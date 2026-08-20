@@ -11,27 +11,40 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email.matches('(?i)^.*(admin|gestao|qualidade|getvb98@gmail.com|saude.recife.pe.gov.br).*$') ||
+        request.auth.token.email == 'getvb98@gmail.com'
+      );
     }
 
     function isAuthorizedAuditor(data) {
-      return data.auditorId == request.auth.uid || data.auditorId == 'SYSTEM_SYNC';
+      return isSignedIn() && (
+        isAdmin() ||
+        data.auditorId == request.auth.uid || 
+        data.auditorId == 'SYSTEM_SYNC'
+      );
     }
 
     // Audits - Hand Hygiene
     match /audits_hand_hygiene/{id} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
     }
 
     // Audits - Patient ID
     match /audits_patient_id/{id} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
     }
 
     // Audits - Safe Surgery
     match /audits_safe_surgery/{id} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
     }
 
     // Escalas OSS
@@ -43,13 +56,13 @@ service cloud.firestore {
     // Units
     match /units/{id} {
       allow read: if isSignedIn();
-      allow write: if false; // Only admins via console for now
+      allow write: if isAdmin();
     }
 
     // Auditors
     match /auditors/{id} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && id == request.auth.uid;
+      allow write: if isSignedIn() && (id == request.auth.uid || isAdmin());
     }
 
     // Test connectivity

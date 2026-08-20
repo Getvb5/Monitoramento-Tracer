@@ -28,6 +28,8 @@ import { getCustomLocalAudits } from '../lib/fallbackData';
 
 interface Props {
   user: User;
+  isAdmin?: boolean;
+  userUnit?: string | null;
 }
 
 interface AuditorProfile {
@@ -37,13 +39,13 @@ interface AuditorProfile {
   defaultUnitId: string;
 }
 
-export default function ColetaDigital({ user }: Props) {
+export default function ColetaDigital({ user, isAdmin = true, userUnit = null }: Props) {
   // State for Auditor Profile
   const [profile, setProfile] = useState<AuditorProfile>({
     name: user.displayName || '',
     professionalCategory: 'Enfermeiro',
     registrationNumber: '',
-    defaultUnitId: ''
+    defaultUnitId: (!isAdmin && userUnit) ? userUnit : ''
   });
   
   const [profileSaved, setProfileSaved] = useState(false);
@@ -77,28 +79,38 @@ export default function ColetaDigital({ user }: Props) {
           name: parsed.name || user.displayName || '',
           professionalCategory: parsed.professionalCategory || 'Enfermeiro',
           registrationNumber: parsed.registrationNumber || '',
-          defaultUnitId: parsed.defaultUnitId || ''
+          defaultUnitId: (!isAdmin && userUnit) ? userUnit : (parsed.defaultUnitId || '')
         });
         setProfileSaved(true);
       } catch (e) {
         console.error('Error loading auditor profile:', e);
       }
     } else {
+      if (!isAdmin && userUnit) {
+        setProfile(p => ({ ...p, defaultUnitId: userUnit }));
+      }
       // Prompt user to configure profile
       setIsEditingProfile(true);
     }
-  }, [user]);
+  }, [user, isAdmin, userUnit]);
 
-  // Load recent audits collected by this auditor from local storage and firestore
+  // Load recent audits collected by this auditor or their unit from local storage and firestore
   const loadRecentAudits = async () => {
     try {
       const { getDeletedAuditIds } = await import('../lib/fallbackData');
       const deletedIds = getDeletedAuditIds();
+      const effectiveUnit = !isAdmin && userUnit ? userUnit : profile.defaultUnitId;
 
       // 1. First set from local storage so the UI updates instantly
       const allLocal = getCustomLocalAudits();
       const userLocal = allLocal
-        .filter((a: any) => a.auditorId === user.uid && !deletedIds.includes(a.id))
+        .filter((a: any) => {
+          if (deletedIds.includes(a.id)) return false;
+          if (!isAdmin && effectiveUnit) {
+            return a.unitId === effectiveUnit || a.hospitalId === effectiveUnit || a.auditorId === user.uid;
+          }
+          return a.auditorId === user.uid;
+        })
         .map((a: any) => ({
           ...a,
           timestampStr: a.timestampStr || new Date().toISOString()
@@ -140,11 +152,9 @@ export default function ColetaDigital({ user }: Props) {
         const { db } = await import('../lib/firebase');
 
         const fetchCollection = async (collName: string, type: 'T01' | 'T02' | 'T03', tracerName: string) => {
-          const q = query(
-            collection(db, collName),
-            where('auditorId', '==', user.uid),
-            limit(100) // limit to avoid fetching too much, sort client-side next
-          );
+          const q = (!isAdmin && effectiveUnit)
+            ? query(collection(db, collName), where('unitId', '==', effectiveUnit), limit(100))
+            : query(collection(db, collName), where('auditorId', '==', user.uid), limit(100));
           const snapshot = await getDocs(q);
           return snapshot.docs.map(doc => {
             const data = doc.data();
@@ -367,14 +377,17 @@ export default function ColetaDigital({ user }: Props) {
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest block">Sua Unidade Padrão *</label>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest block">
+                      Sua Unidade Padrão * {!isAdmin && userUnit && <span className="text-blue-600 font-black">(Vinculada)</span>}
+                    </label>
                     <select 
-                      className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none transition-all text-slate-800"
-                      value={profile.defaultUnitId}
+                      disabled={!isAdmin && !!userUnit}
+                      className={`w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md outline-none transition-all text-slate-800 ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500'}`}
+                      value={(!isAdmin && userUnit) ? userUnit : profile.defaultUnitId}
                       onChange={e => setProfile(p => ({ ...p, defaultUnitId: e.target.value }))}
                     >
                       <option value="">Selecione sua unidade operacional padrão...</option>
-                      {HEALTH_UNITS.map(u => (
+                      {HEALTH_UNITS.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
                     </select>
@@ -521,13 +534,31 @@ export default function ColetaDigital({ user }: Props) {
                   </div>
                   <div className="bg-white rounded-b-lg border border-slate-200 border-t-0 p-1">
                     {activeTracer === 'tracer_01' && (
-                      <PatientIdForm user={user} onComplete={handleAuditComplete} editingAudit={editingAudit} />
+                      <PatientIdForm 
+                        user={user} 
+                        onComplete={handleAuditComplete} 
+                        editingAudit={editingAudit} 
+                        isAdmin={isAdmin}
+                        userUnit={userUnit}
+                      />
                     )}
                     {activeTracer === 'tracer_02' && (
-                      <SafeSurgeryForm user={user} onComplete={handleAuditComplete} editingAudit={editingAudit} />
+                      <SafeSurgeryForm 
+                        user={user} 
+                        onComplete={handleAuditComplete} 
+                        editingAudit={editingAudit} 
+                        isAdmin={isAdmin}
+                        userUnit={userUnit}
+                      />
                     )}
                     {activeTracer === 'tracer_03' && (
-                      <HandHygieneForm user={user} onComplete={handleAuditComplete} editingAudit={editingAudit} />
+                      <HandHygieneForm 
+                        user={user} 
+                        onComplete={handleAuditComplete} 
+                        editingAudit={editingAudit} 
+                        isAdmin={isAdmin}
+                        userUnit={userUnit}
+                      />
                     )}
                   </div>
                 </div>

@@ -192,11 +192,13 @@ interface Props {
   globalDay?: string;
   globalUnit: string;
   globalType: string;
+  globalTracer?: string;
   onSetMonth: (month: string) => void;
   onSetQuarter?: (quarter: string) => void;
   onSetDay?: (day: string) => void;
   onSetUnit: (unit: string) => void;
   onSetType: (type: string) => void;
+  onSetTracer?: (tracer: string) => void;
   sidebarFilter: string;
 }
 
@@ -208,11 +210,13 @@ export default function AuditExplorer({
   globalDay = '',
   globalUnit,
   globalType,
+  globalTracer = '',
   onSetMonth,
   onSetQuarter,
   onSetDay,
   onSetUnit,
   onSetType,
+  onSetTracer,
   sidebarFilter
 }: Props) {
   const [handAudits, setHandAudits] = useState<any[]>([]);
@@ -310,8 +314,12 @@ export default function AuditExplorer({
   }, []);
   
   // Local sub-filters (others are synced globally)
-  const [tracerFilter, setTracerFilter] = useState('');
+  const [tracerFilter, setTracerFilter] = useState(globalTracer || '');
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    setTracerFilter(globalTracer || '');
+  }, [globalTracer]);
 
   useEffect(() => {
     if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
@@ -467,8 +475,8 @@ export default function AuditExplorer({
     const deletedIds = getDeletedAuditIds();
     let combined = [...handAudits, ...patientAudits, ...surgeryAudits].filter(a => !deletedIds.includes(a.id));
     
-    // 1. Filter by Unit
-    const targetUnit = globalUnit;
+    // 1. Filter by Effective Unit
+    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     if (targetUnit) {
       combined = combined.filter(a => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit);
     }
@@ -668,14 +676,17 @@ export default function AuditExplorer({
 
           {/* Synchronized Unit Filter */}
           <div className="flex flex-col">
-            <span className="text-[7px] font-black uppercase text-slate-400 mb-0.5 tracking-wider">Unidade de Saúde</span>
+            <span className="text-[7px] font-black uppercase text-slate-400 mb-0.5 tracking-wider">
+              {isAdmin ? 'Unidade de Saúde' : 'Sua Unidade (Vinculada)'}
+            </span>
             <select 
-              value={globalUnit}
-              onChange={(e) => onSetUnit(e.target.value)}
-              className="p-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-black uppercase outline-none cursor-pointer max-w-[220px] md:max-w-xs"
+              value={isAdmin ? globalUnit : (userUnit || '')}
+              onChange={(e) => isAdmin && onSetUnit(e.target.value)}
+              disabled={!isAdmin && !!userUnit}
+              className={`p-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-black uppercase outline-none max-w-[220px] md:max-w-xs ${!isAdmin ? 'cursor-not-allowed opacity-90 bg-slate-100 text-blue-900 font-black' : 'cursor-pointer'}`}
             >
-              <option value="">Todas as Unidades</option>
-              {HEALTH_UNITS.map(u => (
+              {isAdmin && <option value="">Todas as Unidades</option>}
+              {HEALTH_UNITS.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => (
                 <option key={u.id} value={u.id}>
                   {u.name.replace('Hospital de Pediatria ', '').replace('Policlínica e Maternidade ', '')}
                 </option>
@@ -688,7 +699,10 @@ export default function AuditExplorer({
             <span className="text-[7px] font-black uppercase text-slate-400 mb-0.5 tracking-wider">Tipo do Tracer</span>
             <select 
               value={tracerFilter}
-              onChange={(e) => setTracerFilter(e.target.value)}
+              onChange={(e) => {
+                setTracerFilter(e.target.value);
+                if (onSetTracer) onSetTracer(e.target.value);
+              }}
               className="p-2 bg-slate-50 border border-slate-200 rounded-md text-[10px] font-black uppercase outline-none cursor-pointer"
             >
               <option value="">Todos os Tracers</option>

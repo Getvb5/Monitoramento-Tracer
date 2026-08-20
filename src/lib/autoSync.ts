@@ -195,6 +195,17 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
               }
             }
             
+            // Clean row dictionary to avoid storing empty columns
+            const cleanRow: Record<string, string> = {};
+            for (const [k, v] of Object.entries(row)) {
+              if (k && v !== undefined && v !== null) {
+                const strVal = String(v).trim();
+                if (strVal && strVal !== '-') {
+                  cleanRow[k.trim()] = strVal;
+                }
+              }
+            }
+            
             let auditData: any = {
               unitId: unit.id,
               auditorId: 'SYSTEM_SYNC',
@@ -202,8 +213,7 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
               tracerName: config.name.split(' - ')[1],
               externalSource: true,
               competencia: derivedCompetencia,
-              rawData: row,
-              sourceRowHash: JSON.stringify(row)
+              rawData: cleanRow
             };
 
             if (tracerId === 'tracer_01') {

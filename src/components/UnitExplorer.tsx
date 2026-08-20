@@ -30,9 +30,21 @@ interface Audit {
   tracerName?: string;
 }
 
-export default function UnitExplorer() {
-  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+interface UnitExplorerProps {
+  isAdmin?: boolean;
+  userUnit?: string | null;
+}
+
+export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitExplorerProps) {
+  const effectiveDefaultUnit = !isAdmin && userUnit ? userUnit : null;
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(effectiveDefaultUnit);
   const [searchTerm, setSearchTerm] = useState('');
+
+  React.useEffect(() => {
+    if (!isAdmin && userUnit) {
+      setSelectedUnitId(userUnit);
+    }
+  }, [isAdmin, userUnit]);
   
   const [handAudits, setHandAudits] = React.useState<Audit[]>([]);
   const [patientAudits, setPatientAudits] = React.useState<Audit[]>([]);
@@ -200,11 +212,15 @@ export default function UnitExplorer() {
   }, [refreshTrigger]);
 
   const filteredUnits = useMemo(() => {
-    return HEALTH_UNITS.filter(u => 
+    let list = HEALTH_UNITS;
+    if (!isAdmin && userUnit) {
+      list = list.filter(u => u.id === userUnit);
+    }
+    return list.filter(u => 
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
       u.district.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [searchTerm]);
+  }, [searchTerm, isAdmin, userUnit]);
 
   const selectedUnit = useMemo(() => 
     HEALTH_UNITS.find(u => u.id === selectedUnitId)

@@ -474,12 +474,79 @@ export interface LocalAudit {
   [key: string]: any;
 }
 
+// In-memory cache to guarantee full dataset availability regardless of browser localStorage size limits
+let inMemoryAudits: LocalAudit[] | null = null;
+
+function sanitizeAuditForStorage(audit: any, compact = false) {
+  const clean: any = { ...audit };
+
+  // Remove bulky runtime objects or duplicates
+  delete clean.timestamp;
+  delete clean.sourceRowHash;
+
+  if (!clean.timestampStr) {
+    if (audit.timestamp?.toDate) {
+      clean.timestampStr = audit.timestamp.toDate().toISOString();
+    } else if (audit.timestamp?.seconds) {
+      clean.timestampStr = new Date(audit.timestamp.seconds * 1000).toISOString();
+    } else {
+      clean.timestampStr = new Date().toISOString();
+    }
+  }
+
+  // If in compact mode or external spreadsheet row, omit bulky raw questionnaires if needed
+  if (compact && clean.externalSource) {
+    delete clean.rawData;
+  }
+
+  return clean;
+}
+
+export function safeSaveCustomLocalAudits(items: any[]) {
+  // 1. Maintain in-memory state with complete objects
+  inMemoryAudits = items.map((item: any) => ({
+    ...item,
+    timestamp: {
+      toDate: () => new Date(item.timestampStr || (item.timestamp?.seconds ? item.timestamp.seconds * 1000 : Date.now())),
+      seconds: Math.floor(new Date(item.timestampStr || (item.timestamp?.seconds ? item.timestamp.seconds * 1000 : Date.now())).getTime() / 1000),
+      nanoseconds: 0
+    }
+  }));
+
+  // 2. Safely attempt localStorage persistence with graceful tiered compaction
+  try {
+    const sanitized = items.map(a => sanitizeAuditForStorage(a, false));
+    localStorage.setItem('custom_local_audits', JSON.stringify(sanitized));
+  } catch (e: any) {
+    console.warn('[LocalStorage] Quota exceeded on normal save. Attempting compact storage...');
+    try {
+      // Tier 1: Compact storage (strip heavy rawData from external synced rows while preserving all analytical fields)
+      const compactItems = items.map(a => sanitizeAuditForStorage(a, true));
+      localStorage.setItem('custom_local_audits', JSON.stringify(compactItems));
+    } catch (err2: any) {
+      console.warn('[LocalStorage] Quota still exceeded. Preserving user records and top recent synced records...');
+      try {
+        // Tier 2: Keep all user-created records and most recent synced records (up to 400)
+        const userCreated = items.filter(a => !a.externalSource).map(a => sanitizeAuditForStorage(a, false));
+        const synced = items.filter(a => a.externalSource).slice(-400).map(a => sanitizeAuditForStorage(a, true));
+        const finalFallback = [...userCreated, ...synced];
+        localStorage.setItem('custom_local_audits', JSON.stringify(finalFallback));
+      } catch (err3) {
+        console.warn('[LocalStorage] Could not write full cache to localStorage. Full data remains live in-memory:', err3);
+      }
+    }
+  }
+}
+
 export function getCustomLocalAudits(): LocalAudit[] {
+  if (inMemoryAudits && inMemoryAudits.length > 0) {
+    return inMemoryAudits;
+  }
   try {
     const raw = localStorage.getItem('custom_local_audits');
-    if (!raw) return [];
+    if (!raw) return inMemoryAudits || [];
     const parsed = JSON.parse(raw);
-    return parsed.map((item: any) => ({
+    const hydrated = parsed.map((item: any) => ({
       ...item,
       timestamp: {
         toDate: () => new Date(item.timestampStr || (item.timestamp?.seconds ? item.timestamp.seconds * 1000 : Date.now())),
@@ -487,9 +554,11 @@ export function getCustomLocalAudits(): LocalAudit[] {
         nanoseconds: 0
       }
     }));
+    inMemoryAudits = hydrated;
+    return hydrated;
   } catch (e) {
     console.error('Error parsing custom local audits:', e);
-    return [];
+    return inMemoryAudits || [];
   }
 }
 
@@ -509,7 +578,7 @@ export function saveCustomLocalAudit(audit: any) {
     } else {
       current.push(withStr);
     }
-    localStorage.setItem('custom_local_audits', JSON.stringify(current));
+    safeSaveCustomLocalAudits(current);
   } catch (e) {
     console.error('Error saving custom local audit:', e);
   }
@@ -535,7 +604,7 @@ export function saveCustomLocalAuditsBulk(audits: any[]) {
     });
 
     const updated = Array.from(map.values());
-    localStorage.setItem('custom_local_audits', JSON.stringify(updated));
+    safeSaveCustomLocalAudits(updated);
   } catch (e) {
     console.error('Error saving bulk custom local audits:', e);
   }
@@ -555,13 +624,17 @@ export function deleteAuditFromLocal(id: string) {
     const deleted = getDeletedAuditIds();
     if (!deleted.includes(id)) {
       deleted.push(id);
-      localStorage.setItem('deleted_audit_ids', JSON.stringify(deleted));
+      try {
+        localStorage.setItem('deleted_audit_ids', JSON.stringify(deleted));
+      } catch (err) {
+        console.warn('Error saving deleted_audit_ids to storage:', err);
+      }
     }
     
     // Also remove from custom_local_audits if present
     const custom = getCustomLocalAudits();
     const updated = custom.filter((item: any) => item.id !== id);
-    localStorage.setItem('custom_local_audits', JSON.stringify(updated));
+    safeSaveCustomLocalAudits(updated);
     
     window.dispatchEvent(new Event('local-data-updated'));
   } catch (e) {
@@ -583,7 +656,7 @@ export function updateAuditInLocal(id: string, updatedFields: any) {
       if (current[index].timestamp) {
         delete current[index].timestamp;
       }
-      localStorage.setItem('custom_local_audits', JSON.stringify(current));
+      safeSaveCustomLocalAudits(current);
     } else {
       // If it's a fallback audit being updated, we pull the original, merge, and save it to the custom store
       const allFallbacks = [
@@ -602,7 +675,7 @@ export function updateAuditInLocal(id: string, updatedFields: any) {
           delete item.timestamp;
         }
         current.push(item);
-        localStorage.setItem('custom_local_audits', JSON.stringify(current));
+        safeSaveCustomLocalAudits(current);
       }
     }
     
@@ -669,7 +742,7 @@ export function replaceSyncedLocalAudits(type: string, tracerId: string, newAudi
     });
 
     const updated = [...preserved, ...formattedNew];
-    localStorage.setItem('custom_local_audits', JSON.stringify(updated));
+    safeSaveCustomLocalAudits(updated);
   } catch (e) {
     console.error('Error replacing synced local audits:', e);
   }

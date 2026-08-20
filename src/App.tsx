@@ -7,7 +7,8 @@ import {
   HeartPulse, Activity, UserCircle, Database, 
   FileStack, Building2, CalendarDays, Bell, HelpCircle, 
   User as UserIcon, ChevronDown, Menu, X, SlidersHorizontal,
-  FolderLock, RefreshCw, UserCheck, ClipboardCheck
+  FolderLock, RefreshCw, UserCheck, ClipboardCheck, Layers,
+  Users, Filter, ChevronRight, CheckCircle2, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -16,10 +17,11 @@ import AuditExplorer, { MONTH_NAMES } from './components/AuditExplorer';
 import SchedulesSync from './components/SchedulesSync';
 import UnitExplorer from './components/UnitExplorer';
 import ColetaDigital from './components/ColetaDigital';
+import AuditorUnitModal from './components/AuditorUnitModal';
 import { ADMIN_EMAILS, USER_UNIT_MAPPING, HEALTH_UNITS } from './lib/utils';
 import loginBg from './assets/images/recife_login_bg_1780339628886.png';
 
-type View = 'dashboard' | 'schedules' | 'data_mgmt' | 'explorer' | 'explorer_units' | 'coleta';
+type View = 'dashboard' | 'schedules' | 'data_mgmt' | 'explorer' | 'explorer_units' | 'coleta' | 'indicators' | 'auditors' | 'sectors';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -107,10 +109,12 @@ export default function App() {
   const [globalDay, setGlobalDay] = useState<string>('');
   const [globalUnit, setGlobalUnit] = useState<string>('');
   const [globalType, setGlobalType] = useState<string>('');
+  const [globalTracer, setGlobalTracer] = useState<string>('');
   const [explorerFilter, setExplorerFilter] = useState<string>('');
 
   const [isDayModalOpen, setIsDayModalOpen] = useState(false);
   const [lastMonthPrompted, setLastMonthPrompted] = useState<string>('');
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
   // Open day selector pop-up whenever globalMonth changes to a non-empty value
   useEffect(() => {
@@ -139,6 +143,11 @@ export default function App() {
   // UI state
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [isAuditorModalManualOpen, setIsAuditorModalManualOpen] = useState(false);
+
+  const [dynamicAuditorUnit, setDynamicAuditorUnit] = useState<string | null>(() => {
+    return localStorage.getItem('auditor_selected_unit') || null;
+  });
 
   const { currentProfile, isAdmin, userUnit } = useMemo(() => {
     if (!user || !user.email) return { currentProfile: 'AUDITOR' as const, isAdmin: false, userUnit: null };
@@ -147,9 +156,20 @@ export default function App() {
     const adminList = ADMIN_EMAILS.map(e => e.trim().toLowerCase());
     const isBaseAdmin = adminList.some(email => email === userEmail) || userEmail === 'getvb98@gmail.com';
     
-    const unit = Object.entries(USER_UNIT_MAPPING).find(
+    const mappedUnit = Object.entries(USER_UNIT_MAPPING).find(
       ([email]) => email.trim().toLowerCase() === userEmail
     )?.[1] || null;
+
+    let savedUnit: string | null = null;
+    try {
+      const p = localStorage.getItem(`auditor_profile_${user.uid}`);
+      if (p) {
+        const parsed = JSON.parse(p);
+        if (parsed.defaultUnitId) savedUnit = parsed.defaultUnitId;
+      }
+    } catch (_) {}
+
+    const effectiveUserUnit = mappedUnit || dynamicAuditorUnit || savedUnit || null;
     
     let profile: 'ADMINISTRADOR' | 'AUDITOR' = 'AUDITOR';
     if (isBaseAdmin) {
@@ -163,9 +183,44 @@ export default function App() {
     return { 
       currentProfile: profile,
       isAdmin: profile === 'ADMINISTRADOR', 
-      userUnit: unit 
+      userUnit: effectiveUserUnit 
     };
-  }, [user, selectedProfile]);
+  }, [user, selectedProfile, dynamicAuditorUnit]);
+
+  const handleSaveAuditorUnit = async (unitId: string, auditorName: string) => {
+    if (!user) return;
+    setDynamicAuditorUnit(unitId);
+    localStorage.setItem('auditor_selected_unit', unitId);
+    
+    const existingProfileStr = localStorage.getItem(`auditor_profile_${user.uid}`);
+    let pObj = {
+      name: auditorName,
+      professionalCategory: 'Enfermeiro',
+      registrationNumber: '',
+      defaultUnitId: unitId
+    };
+    if (existingProfileStr) {
+      try {
+        pObj = { ...JSON.parse(existingProfileStr), name: auditorName, defaultUnitId: unitId };
+      } catch (_) {}
+    }
+    localStorage.setItem(`auditor_profile_${user.uid}`, JSON.stringify(pObj));
+    setIsAuditorModalManualOpen(false);
+
+    try {
+      const isQuotaExceededAtm = localStorage.getItem('firestore_quota_exceeded') === 'true';
+      if (!isQuotaExceededAtm) {
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+        await setDoc(doc(db, 'auditors', user.uid), {
+          ...pObj,
+          email: user.email,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn('Could not save auditor unit to Firestore:', e);
+    }
+  };
 
   const forceSync = async () => {
     if (autoSyncState === 'syncing') return;
@@ -287,6 +342,82 @@ export default function App() {
       setGlobalUnit(userUnit);
     }
   }, [isAdmin, userUnit]);
+
+  // Information Architecture Metadata & Breadcrumbs
+  const viewMetadata: Record<View, { section: string; title: string; subtitle: string }> = {
+    dashboard: {
+      section: 'Monitoramento & Análise',
+      title: 'Visão Geral',
+      subtitle: 'Painel executivo com metas assistenciais, aderência e indicadores consolidados'
+    },
+    indicators: {
+      section: 'Monitoramento & Análise',
+      title: 'Conformidade por Item',
+      subtitle: 'Análise aprofundada dos itens auditados e conformidades por Tracer (T01, T02, T03)'
+    },
+    auditors: {
+      section: 'Monitoramento & Análise',
+      title: 'Participação de Auditores',
+      subtitle: 'Volume de auditorias por profissional, distribuição e engajamento em campo'
+    },
+    sectors: {
+      section: 'Monitoramento & Análise',
+      title: 'Distribuição por Setor',
+      subtitle: 'Volume e taxa de conformidade por setor e enfermaria hospitalar'
+    },
+    explorer: {
+      section: 'Registros & Auditorias',
+      title: 'Explorador de Auditorias',
+      subtitle: explorerFilter ? `Filtro ativo: ${explorerFilter}` : 'Consulta de registros brutos, filtros avançados e busca textual'
+    },
+    explorer_units: {
+      section: 'Registros & Auditorias',
+      title: 'Unidades de Saúde',
+      subtitle: 'Painel comparativo de cobertura e desempenho entre os 7 hospitais e policlínicas'
+    },
+    coleta: {
+      section: 'Operação em Campo',
+      title: 'Iniciar Tracer',
+      subtitle: 'Instrumento digital para realização e envio de auditorias clínicas em tempo real'
+    },
+    schedules: {
+      section: 'Gestão do Sistema',
+      title: 'Sincronização & Fontes',
+      subtitle: 'Status de conexão das planilhas Google Sheets e carga de dados em tempo real'
+    },
+    data_mgmt: {
+      section: 'Gestão do Sistema',
+      title: 'Gestão de Cadastros',
+      subtitle: 'Manutenção de dados de apoio e auditorias'
+    }
+  };
+
+  const currentViewMeta = viewMetadata[view] || viewMetadata.dashboard;
+
+  const handleClearAllFilters = () => {
+    setGlobalMonth('');
+    setGlobalQuarter('');
+    setGlobalDay('');
+    if (isAdmin || !userUnit) {
+      setGlobalUnit('');
+    }
+    setGlobalType('');
+    setGlobalTracer('');
+    setExplorerFilter('');
+  };
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (globalMonth !== '') count++;
+    if (globalQuarter !== '') count++;
+    if (globalDay !== '') count++;
+    if (globalUnit !== '' && (isAdmin || !userUnit)) count++;
+    if (globalTracer !== '') count++;
+    if (explorerFilter !== '') count++;
+    return count;
+  }, [globalMonth, globalQuarter, globalDay, globalUnit, globalTracer, explorerFilter, isAdmin, userUnit]);
+
+  const isFilterActive = activeFiltersCount > 0;
 
   if (loading) {
     return (
@@ -450,25 +581,10 @@ export default function App() {
     );
   }
 
-  // Active Title computations
-  const primaryTitle = view === 'dashboard' ? 'Visão Geral' : 
-                       view === 'explorer_units' ? 'Unidades de Saúde' :
-                       view === 'explorer' ? 'Explorador de Auditorias' :
-                       view === 'schedules' ? 'Referência (Mês)' : 
-                       view === 'coleta' ? 'INICIAR TRACER' : 'Admin de Cadastros';
-
-  const secondaryTitle = view === 'dashboard' ? 'Painel executivo de indicadores da saúde' :
-                         view === 'explorer_units' ? 'Acompanhamento consolidado por estabelecimento de saúde' :
-                         view === 'explorer' ? `Filtro atual: ${explorerFilter || 'Todos os registros'}` :
-                         view === 'schedules' ? 'Painel de controle de cronogramas por mês' : 
-                         view === 'coleta' ? 'Instrumento digital para auditorias de campo' : 'Manipulação e manutenção de dados';
-
-  const isFilterActive = explorerFilter || globalMonth !== '' || globalQuarter !== '' || globalDay !== '' || globalUnit !== '' || globalType !== '';
-
   return (
     <div className="flex min-h-screen bg-[#f8fafc] font-sans selection:bg-blue-100 selection:text-blue-900">
       
-      {/* 1. LEFT SIDEBAR - Desktop */}
+      {/* 1. LEFT SIDEBAR - Desktop (Grouped by Information Architecture) */}
       <aside className="w-64 bg-[#0a0b9e] text-white shrink-0 hidden lg:flex flex-col border-r border-white/10 relative z-20">
         
         {/* Brand Header */}
@@ -484,9 +600,9 @@ export default function App() {
                 <defs>
                   {/* Linear Gradient for Cross (Green/Yellow-Green) */}
                   <linearGradient id="sidebarCrossGrad" x1="10" y1="50" x2="60" y2="20" gradientUnits="userSpaceOnUse">
-                    <stop offset="0%" stopColor="#4ADE80" /> {/* vibrant light green */}
-                    <stop offset="50%" stopColor="#A3E635" /> {/* yellow green */}
-                    <stop offset="100%" stopColor="#EAB308" /> {/* amber yellow */}
+                    <stop offset="0%" stopColor="#4ADE80" />
+                    <stop offset="50%" stopColor="#A3E635" />
+                    <stop offset="100%" stopColor="#EAB308" />
                   </linearGradient>
                   
                   {/* Linear Gradient for Heart (Yellow/Orange/Red) */}
@@ -584,58 +700,116 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sidebar Nav Items */}
-        <nav className="flex-grow px-3 py-6 space-y-4 overflow-y-auto scrollbar-hide">
-          <SidebarButton 
-            active={view === 'dashboard'} 
-            onClick={() => { setView('dashboard'); setExplorerFilter(''); }}
-            icon={<LayoutDashboard className="w-4 h-4" />}
-            label="Visão Geral"
-          />
-          {currentProfile === 'AUDITOR' && (
+        {/* Sidebar Nav Items Structured in Semantic Categories */}
+        <nav className="flex-grow px-3 py-4 space-y-4 overflow-y-auto scrollbar-hide text-left">
+          
+          {/* Categoria 1: Monitoramento & Análise */}
+          <div className="space-y-1">
+            <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none flex items-center gap-1.5">
+              <Activity className="w-3 h-3 text-blue-300" />
+              <span>Monitoramento</span>
+            </div>
             <SidebarButton 
-              active={view === 'coleta'} 
-              onClick={() => { setView('coleta'); setExplorerFilter(''); }}
-              icon={<ClipboardCheck className="w-4 h-4" />}
-              label="INICIAR TRACER"
+              active={view === 'dashboard'} 
+              onClick={() => { setView('dashboard'); setExplorerFilter(''); }}
+              icon={<LayoutDashboard className="w-4 h-4" />}
+              label="Visão Geral"
             />
+            <SidebarButton 
+              active={view === 'indicators'} 
+              onClick={() => { setView('indicators'); setExplorerFilter(''); }}
+              icon={<Layers className="w-4 h-4" />}
+              label="Conformidade por Item"
+            />
+            <SidebarButton 
+              active={view === 'auditors'} 
+              onClick={() => { setView('auditors'); setExplorerFilter(''); }}
+              icon={<Users className="w-4 h-4" />}
+              label="Participação de Auditores"
+            />
+            <SidebarButton 
+              active={view === 'sectors'} 
+              onClick={() => { setView('sectors'); setExplorerFilter(''); }}
+              icon={<Building2 className="w-4 h-4" />}
+              label="Distribuição por Setor"
+            />
+          </div>
+
+          {/* Categoria 2: Registros & Auditorias */}
+          <div className="space-y-1 pt-1 border-t border-white/5">
+            <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none flex items-center gap-1.5">
+              <ClipboardList className="w-3 h-3 text-blue-300" />
+              <span>Registros</span>
+            </div>
+            <SidebarButton 
+              active={view === 'explorer'} 
+              onClick={() => { setView('explorer'); setExplorerFilter(''); }}
+              icon={<ClipboardList className="w-4 h-4" />}
+              label="Explorador de Auditorias"
+            />
+            <SidebarButton 
+              active={view === 'explorer_units'} 
+              onClick={() => { setView('explorer_units'); setExplorerFilter(''); }}
+              icon={<Building2 className="w-4 h-4" />}
+              label="Unidades de Saúde"
+            />
+          </div>
+
+          {/* Categoria 3: Operação em Campo */}
+          {currentProfile === 'AUDITOR' && (
+            <div className="space-y-1 pt-1 border-t border-white/5">
+              <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-emerald-300/70 uppercase select-none flex items-center gap-1.5">
+                <ClipboardCheck className="w-3 h-3 text-emerald-300" />
+                <span>Operação em Campo</span>
+              </div>
+              <SidebarButton 
+                active={view === 'coleta'} 
+                onClick={() => { setView('coleta'); setExplorerFilter(''); }}
+                icon={<ClipboardCheck className="w-4 h-4" />}
+                label="INICIAR TRACER"
+                isAction
+              />
+            </div>
           )}
-          <SidebarButton 
-            active={view === 'explorer'} 
-            onClick={() => { setView('explorer'); setExplorerFilter(''); }}
-            icon={<ClipboardList className="w-4 h-4" />}
-            label="Explorar Dados"
-          />
-          <SidebarButton 
-            active={view === 'explorer_units'} 
-            onClick={() => { setView('explorer_units'); setExplorerFilter(''); }}
-            icon={<Building2 className="w-4 h-4" />}
-            label="Unidades de Saúde"
-          />
+
+          {/* Categoria 4: Gestão do Sistema */}
+          <div className="space-y-1 pt-1 border-t border-white/5">
+            <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none flex items-center gap-1.5">
+              <Database className="w-3 h-3 text-blue-300" />
+              <span>Gestão do Sistema</span>
+            </div>
+            <SidebarButton 
+              active={view === 'schedules'} 
+              onClick={() => { setView('schedules'); setExplorerFilter(''); }}
+              icon={<RefreshCw className="w-4 h-4" />}
+              label="Sincronização & Fontes"
+            />
+            {isAdmin && (
+              <SidebarButton 
+                active={view === 'data_mgmt'} 
+                onClick={() => { setView('data_mgmt'); setExplorerFilter(''); }}
+                icon={<FolderLock className="w-4 h-4" />}
+                label="Gestão de Cadastros"
+              />
+            )}
+          </div>
+
         </nav>
 
         {/* Clear Filters Action */}
         <div className="p-4 border-t border-white/10 space-y-2">
           {isFilterActive && (
             <button 
-              onClick={() => {
-                setView('dashboard');
-                setExplorerFilter('');
-                setGlobalMonth('');
-                setGlobalQuarter('');
-                setGlobalDay('');
-                setGlobalUnit('');
-                setGlobalType('');
-              }}
+              onClick={handleClearAllFilters}
               className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm shadow-amber-500/10"
             >
               <X className="w-3.5 h-3.5" />
-              Limpar filtros
+              Limpar {activeFiltersCount} filtro{activeFiltersCount > 1 ? 's' : ''}
             </button>
           )}
 
-          <div className="py-2 text-center text-[8px] font-bold text-white/40 uppercase tracking-widest select-none">
-            Painel Tracer • v2.0
+          <div className="py-1 text-center text-[8px] font-bold text-white/40 uppercase tracking-widest select-none">
+            Painel Tracer • Arquitetura v2.1
           </div>
         </div>
       </aside>
@@ -692,32 +866,88 @@ export default function App() {
 
               {/* Navigation in Mobile Drawer */}
               <nav className="flex-grow px-3 py-4 space-y-4 overflow-y-auto">
-                <SidebarButton 
-                  active={view === 'dashboard'} 
-                  onClick={() => { setView('dashboard'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
-                  icon={<LayoutDashboard className="w-4 h-4" />}
-                  label="Visão Geral"
-                />
-                {currentProfile === 'AUDITOR' && (
+                <div className="space-y-1">
+                  <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none">
+                    Monitoramento
+                  </div>
                   <SidebarButton 
-                    active={view === 'coleta'} 
-                    onClick={() => { setView('coleta'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
-                    icon={<ClipboardCheck className="w-4 h-4" />}
-                    label="INICIAR TRACER"
+                    active={view === 'dashboard'} 
+                    onClick={() => { setView('dashboard'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<LayoutDashboard className="w-4 h-4" />}
+                    label="Visão Geral"
                   />
+                  <SidebarButton 
+                    active={view === 'indicators'} 
+                    onClick={() => { setView('indicators'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<Layers className="w-4 h-4" />}
+                    label="Conformidade por Item"
+                  />
+                  <SidebarButton 
+                    active={view === 'auditors'} 
+                    onClick={() => { setView('auditors'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<Users className="w-4 h-4" />}
+                    label="Participação de Auditores"
+                  />
+                  <SidebarButton 
+                    active={view === 'sectors'} 
+                    onClick={() => { setView('sectors'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<Building2 className="w-4 h-4" />}
+                    label="Distribuição por Setor"
+                  />
+                </div>
+
+                <div className="space-y-1 pt-1 border-t border-white/5">
+                  <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none">
+                    Registros
+                  </div>
+                  <SidebarButton 
+                    active={view === 'explorer'} 
+                    onClick={() => { setView('explorer'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<ClipboardList className="w-4 h-4" />}
+                    label="Explorador de Auditorias"
+                  />
+                  <SidebarButton 
+                    active={view === 'explorer_units'} 
+                    onClick={() => { setView('explorer_units'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<Building2 className="w-4 h-4" />}
+                    label="Unidades de Saúde"
+                  />
+                </div>
+
+                {currentProfile === 'AUDITOR' && (
+                  <div className="space-y-1 pt-1 border-t border-white/5">
+                    <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-emerald-300/70 uppercase select-none">
+                      Operação
+                    </div>
+                    <SidebarButton 
+                      active={view === 'coleta'} 
+                      onClick={() => { setView('coleta'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                      icon={<ClipboardCheck className="w-4 h-4" />}
+                      label="INICIAR TRACER"
+                      isAction
+                    />
+                  </div>
                 )}
-                <SidebarButton 
-                  active={view === 'explorer'} 
-                  onClick={() => { setView('explorer'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
-                  icon={<ClipboardList className="w-4 h-4" />}
-                  label="Explorar Dados"
-                />
-                <SidebarButton 
-                  active={view === 'explorer_units'} 
-                  onClick={() => { setView('explorer_units'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
-                  icon={<Building2 className="w-4 h-4" />}
-                  label="Unidades de Saúde"
-                />
+
+                <div className="space-y-1 pt-1 border-t border-white/5">
+                  <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none">
+                    Gestão
+                  </div>
+                  <SidebarButton 
+                    active={view === 'schedules'} 
+                    onClick={() => { setView('schedules'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                    icon={<RefreshCw className="w-4 h-4" />}
+                    label="Sincronização & Fontes"
+                  />
+                  {isAdmin && (
+                    <SidebarButton 
+                      active={view === 'data_mgmt'} 
+                      onClick={() => { setView('data_mgmt'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                      icon={<FolderLock className="w-4 h-4" />}
+                      label="Gestão de Cadastros"
+                    />
+                  )}
+                </div>
               </nav>
             </motion.aside>
           </>
@@ -727,31 +957,40 @@ export default function App() {
       {/* 3. RIGHT CONTENT AREA */}
       <div className="flex-1 flex flex-col min-h-screen overflow-x-hidden">
         
-        {/* Main top bar */}
-        <header className="h-[76px] px-4 md:px-8 bg-white border-b border-slate-200/80 flex items-center justify-between shrink-0 relative z-10 gap-4">
+        {/* Main Top Header Bar (Hierarchical Navigation + Grouped Filters) */}
+        <header className="min-h-[76px] py-2 px-4 md:px-8 bg-white border-b border-slate-200/80 flex flex-wrap items-center justify-between shrink-0 relative z-10 gap-3">
           
+          {/* Breadcrumb & Section Hierarchy */}
           <div className="flex items-center gap-3">
             {/* Hamburger Button for Mobile */}
             <button 
               onClick={() => setMobileSidebarOpen(true)}
-              className="p-2 -ml-2 rounded-xl text-slate-500 hover:bg-slate-100 flex lg:hidden"
+              className="p-2 -ml-2 rounded-xl text-slate-500 hover:bg-slate-100 flex lg:hidden cursor-pointer"
+              aria-label="Abrir menu lateral"
             >
               <Menu className="w-5 h-5" />
             </button>
 
-            {/* View Title */}
-            <div>
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">{primaryTitle}</h1>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider hidden sm:block">{secondaryTitle}</p>
+            {/* Breadcrumb Trail */}
+            <div className="text-left">
+              <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                <span>{currentViewMeta.section}</span>
+                <ChevronRight className="w-2.5 h-2.5 text-slate-300" />
+                <span className="text-blue-600 font-bold">{currentViewMeta.title}</span>
+              </div>
+              <h1 className="text-lg md:text-xl font-black text-slate-900 tracking-tight leading-tight">{currentViewMeta.title}</h1>
+              <p className="text-[10px] text-slate-400 font-bold hidden sm:block leading-none mt-0.5">{currentViewMeta.subtitle}</p>
             </div>
           </div>
 
-          {/* Centralized filters (Month and Health Unit only) */}
-          <div className="hidden md:flex items-center gap-3">
+          {/* Grouped Global Filters (Temporal + Contextual) */}
+          <div className="hidden xl:flex items-center gap-2.5 bg-slate-50/80 p-1.5 rounded-2xl border border-slate-200/60 shadow-xs">
             
-            {/* Selector 1: Mês (Calendar) */}
-            <div className="flex items-center gap-2 bg-[#f8fafc] hover:bg-slate-100/80 border border-slate-200/60 rounded-xl px-3 py-2 cursor-pointer transition-colors shadow-sm">
-              <CalendarDays className="w-4 h-4 text-slate-500 shrink-0" />
+            {/* Group A: Temporal (Mês, Trimestre, Dia) */}
+            <div className="flex items-center gap-1.5 bg-white rounded-xl px-2.5 py-1.5 border border-slate-200/80 shadow-2xs">
+              <CalendarDays className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              
+              {/* Mês */}
               <select 
                 value={globalMonth}
                 onChange={(e) => {
@@ -761,17 +1000,17 @@ export default function App() {
                   }
                 }}
                 className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1"
+                aria-label="Filtro de Mês"
               >
                 <option value="">Mês</option>
                 {MONTH_NAMES.map((m, idx) => (
                   <option key={idx} value={String(idx)}>{m}</option>
                 ))}
               </select>
-            </div>
 
-            {/* Selector 1.2: Trimestre */}
-            <div className="flex items-center gap-2 bg-[#f8fafc] hover:bg-slate-100/80 border border-slate-200/60 rounded-xl px-3 py-2 cursor-pointer transition-colors shadow-sm">
-              <CalendarDays className="w-4 h-4 text-slate-500 shrink-0" />
+              <span className="text-slate-200">|</span>
+
+              {/* Trimestre */}
               <select 
                 value={globalQuarter}
                 onChange={(e) => {
@@ -782,66 +1021,124 @@ export default function App() {
                   }
                 }}
                 className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1"
+                aria-label="Filtro de Trimestre"
               >
                 <option value="">Trimestre</option>
-                <option value="1">1º Trimestre</option>
-                <option value="2">2º Trimestre</option>
-                <option value="3">3º Trimestre</option>
-                <option value="4">4º Trimestre</option>
+                <option value="1">1º Trim.</option>
+                <option value="2">2º Trim.</option>
+                <option value="3">3º Trim.</option>
+                <option value="4">4º Trim.</option>
               </select>
+
+              {/* Dia (se mês ativo) */}
+              {globalMonth !== '' && (
+                <button 
+                  onClick={() => setIsDayModalOpen(true)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase transition-all cursor-pointer ${
+                    globalDay !== '' 
+                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' 
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                  title="Filtrar por dia do mês"
+                >
+                  <SlidersHorizontal className="w-2.5 h-2.5" />
+                  <span>{globalDay !== '' ? `Dia ${globalDay}` : 'Dia'}</span>
+                  {globalDay !== '' && (
+                    <span 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setGlobalDay('');
+                      }}
+                      className="hover:text-red-500 ml-0.5"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
 
-            {/* Selector 1.5: Dia Filter chip next to month if selected */}
-            {globalMonth !== '' && (
-              <div 
-                onClick={() => setIsDayModalOpen(true)}
-                className={`flex items-center gap-1.5 border rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer shadow-sm ${
-                  globalDay !== '' 
-                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100' 
-                    : 'bg-[#f8fafc] hover:bg-slate-100/80 border border-slate-200/60 text-slate-500'
-                }`}
-                title="Clique para filtrar por dia do mês"
+            {/* Group B: Contextual (Unidade, Tracer) */}
+            <div className="flex items-center gap-1.5 bg-white rounded-xl px-2.5 py-1.5 border border-slate-200/80 shadow-2xs">
+              <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              
+              {/* Unidade de Saúde */}
+              <select 
+                value={globalUnit}
+                onChange={(e) => setGlobalUnit(e.target.value)}
+                disabled={!isAdmin && !!userUnit}
+                className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1 max-w-[140px] truncate"
+                aria-label="Filtro de Unidade de Saúde"
               >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>{globalDay !== '' ? `Dia: ${globalDay}` : 'Filtrar por Dia'}</span>
-                {globalDay !== '' && (
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setGlobalDay('');
-                    }} 
-                    className="p-0.5 hover:bg-indigo-200 rounded shrink-0 ml-1 cursor-pointer"
-                  >
-                    <X className="w-2.5 h-2.5 text-indigo-500" />
-                  </button>
-                )}
+                <option value="">Todas Unidades</option>
+                {HEALTH_UNITS.map(u => (
+                  <option key={u.id} value={u.id}>{u.name.replace('Hospital de Pediatria ', '').replace('Policlínica e Maternidade ', '')}</option>
+                ))}
+              </select>
+
+              <span className="text-slate-200">|</span>
+
+              {/* Tracer */}
+              <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <select 
+                value={globalTracer}
+                onChange={(e) => setGlobalTracer(e.target.value)}
+                className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1 max-w-[110px]"
+                aria-label="Filtro de Tracer"
+              >
+                <option value="">Todos Tracers</option>
+                <option value="T01">T01 - Beira Leito</option>
+                <option value="T02">T02 - Proc. Cirúrgicos</option>
+                <option value="T03">T03 - Higienização</option>
+              </select>
+              {globalTracer !== '' && (
+                <button
+                  onClick={() => setGlobalTracer('')}
+                  className="p-0.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
+                  title="Limpar tracer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Active Filters Badge & Quick Reset */}
+            {isFilterActive && (
+              <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-2.5 py-1 text-[9px] font-black uppercase">
+                <span>{activeFiltersCount} ativo{activeFiltersCount > 1 ? 's' : ''}</span>
+                <button 
+                  onClick={handleClearAllFilters} 
+                  className="p-0.5 hover:bg-amber-200 rounded text-amber-700 cursor-pointer"
+                  title="Limpar todos os filtros"
+                >
+                  <X className="w-3 h-3" />
+                </button>
               </div>
             )}
 
-            {/* Selector 2: Unidade de Saúde */}
-            <div className="flex items-center gap-2 bg-[#f8fafc] hover:bg-slate-100/80 border border-slate-200/60 rounded-xl px-4 py-2 cursor-pointer transition-colors shadow-sm">
-              <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
-              <div className="flex flex-col text-left">
-                <span className="text-[7.5px] font-semibold text-slate-400 leading-none uppercase">Unidade de Saúde</span>
-                <select 
-                  value={globalUnit}
-                  onChange={(e) => setGlobalUnit(e.target.value)}
-                  disabled={!isAdmin && !!userUnit}
-                  className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1 mt-0.5"
-                >
-                  <option value="">Todas</option>
-                  {HEALTH_UNITS.map(u => (
-                    <option key={u.id} value={u.id}>{u.name.replace('Hospital de Pediatria ', '').replace('Policlínica e Maternidade ', '')}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
           </div>
 
-          {/* User Profile Area (Notification & Help buttons removed as requested) */}
-          <div className="flex items-center gap-2 md:gap-4.5">
+          {/* User Profile & Actions Area */}
+          <div className="flex items-center gap-2 md:gap-3">
             
+            {/* Mobile Filter Toggle Button */}
+            <button 
+              onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)}
+              className={`xl:hidden flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                isFilterActive 
+                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs' 
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filtros</span>
+              {isFilterActive && (
+                <span className="bg-slate-950 text-white rounded-full w-4 h-4 flex items-center justify-center text-[8px]">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+
             {/* Real-time Sync Button */}
             <button 
               onClick={forceSync}
@@ -850,14 +1147,14 @@ export default function App() {
               title="Forçar atualização e sincronizar planilhas em tempo real"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${autoSyncState === 'syncing' ? 'animate-spin' : ''}`} />
-              <span className="text-[9px] font-black uppercase tracking-wider hidden md:inline-block">Sincronizar</span>
+              <span className="text-[9px] font-black uppercase tracking-wider hidden sm:inline-block">Sincronizar</span>
             </button>
 
             {/* User Dropdown */}
             <div className="relative">
               <button 
                 onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-2.5 p-1 px-2.5 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200/60"
+                className="flex items-center gap-2.5 p-1 px-2.5 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200/60 cursor-pointer"
               >
                 <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0 shadow-inner">
                   {user.photoURL ? (
@@ -920,16 +1217,28 @@ export default function App() {
                       )}
 
                       {currentProfile === 'AUDITOR' && (
-                        <button 
-                          onClick={() => {
-                            setUserDropdownOpen(false);
-                            setView('coleta');
-                          }}
-                          className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-[10px] font-extrabold uppercase tracking-wide rounded-lg text-left flex items-center gap-2 cursor-pointer"
-                        >
-                          <UserCheck className="w-4 h-4 text-slate-400" />
-                          Perfil & INICIAR TRACER
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              setView('coleta');
+                            }}
+                            className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-[10px] font-extrabold uppercase tracking-wide rounded-lg text-left flex items-center gap-2 cursor-pointer"
+                          >
+                            <UserCheck className="w-4 h-4 text-slate-400" />
+                            Perfil & INICIAR TRACER
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              setIsAuditorModalManualOpen(true);
+                            }}
+                            className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-900 text-[10px] font-extrabold uppercase tracking-wide rounded-lg text-left flex items-center gap-2 cursor-pointer"
+                          >
+                            <Building2 className="w-4 h-4 text-slate-400" />
+                            Vincular / Alterar Unidade
+                          </button>
+                        </>
                       )}
                       <button 
                         onClick={() => {
@@ -960,7 +1269,99 @@ export default function App() {
           </div>
         </header>
 
-        {/* 4. MAIN CONTENT CONTAINER CONTAINER (Saves standard margins & max width) */}
+        {/* Collapsible Mobile Filter Bar */}
+        <AnimatePresence>
+          {isMobileFilterOpen && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="xl:hidden bg-slate-100 border-b border-slate-200 px-4 py-3 space-y-3 overflow-hidden text-left"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider">Filtros Globais</span>
+                {isFilterActive && (
+                  <button 
+                    onClick={handleClearAllFilters}
+                    className="text-[9px] font-black uppercase text-amber-700 bg-amber-100 px-2 py-0.5 rounded cursor-pointer"
+                  >
+                    Limpar todos
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200">
+                  <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
+                  <select 
+                    value={globalMonth}
+                    onChange={(e) => {
+                      setGlobalMonth(e.target.value);
+                      if (e.target.value !== '') setGlobalQuarter('');
+                    }}
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
+                  >
+                    <option value="">Mês: Todos</option>
+                    {MONTH_NAMES.map((m, idx) => (
+                      <option key={idx} value={String(idx)}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200">
+                  <CalendarDays className="w-4 h-4 text-slate-400 shrink-0" />
+                  <select 
+                    value={globalQuarter}
+                    onChange={(e) => {
+                      setGlobalQuarter(e.target.value);
+                      if (e.target.value !== '') {
+                        setGlobalMonth('');
+                        setGlobalDay('');
+                      }
+                    }}
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
+                  >
+                    <option value="">Trimestre: Todos</option>
+                    <option value="1">1º Trimestre</option>
+                    <option value="2">2º Trimestre</option>
+                    <option value="3">3º Trimestre</option>
+                    <option value="4">4º Trimestre</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200">
+                  <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                  <select 
+                    value={globalUnit}
+                    onChange={(e) => setGlobalUnit(e.target.value)}
+                    disabled={!isAdmin && !!userUnit}
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
+                  >
+                    <option value="">Unidade: Todas</option>
+                    {HEALTH_UNITS.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200">
+                  <Layers className="w-4 h-4 text-slate-400 shrink-0" />
+                  <select 
+                    value={globalTracer}
+                    onChange={(e) => setGlobalTracer(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
+                  >
+                    <option value="">Tracer: Todos</option>
+                    <option value="T01">T01 - Beira Leito</option>
+                    <option value="T02">T02 - Proc. Cirúrgicos</option>
+                    <option value="T03">T03 - Higienização</option>
+                  </select>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 4. MAIN CONTENT CONTAINER (Saves standard margins & max width) */}
         <main className="flex-grow p-4 md:p-8 max-w-7xl w-full mx-auto space-y-8">
           
           {isQuotaExceeded && (
@@ -1001,15 +1402,15 @@ export default function App() {
           {!isAdmin && userUnit && (
             <div className="bg-blue-50/50 border border-blue-200/60 rounded-2xl p-4.5 flex items-center gap-3.5">
               <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
-              <p className="text-xs text-blue-800 font-bold uppercase tracking-tight">
-                Identificação segura de unidade: <span className="underline">{HEALTH_UNITS.find(u => u.id === userUnit)?.name}</span>. Você possui permissão para visualizar e consolidar os relatórios da sua respectiva unidade.
+              <p className="text-xs text-blue-800 font-bold uppercase tracking-tight text-left">
+                Identificação segura de unidade: <span className="underline font-black">{HEALTH_UNITS.find(u => u.id === userUnit)?.name}</span>. Você possui permissão para visualizar e consolidar os relatórios da sua respectiva unidade.
               </p>
             </div>
           )}
 
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${view}-${explorerFilter}-${globalMonth}-${globalQuarter}-${globalDay}-${globalUnit}-${globalType}`}
+              key={`${view}-${explorerFilter}-${globalMonth}-${globalQuarter}-${globalDay}-${globalUnit}-${globalType}-${globalTracer}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -1026,18 +1427,104 @@ export default function App() {
                   globalDay={globalDay}
                   globalUnit={globalUnit}
                   globalType={globalType}
+                  globalTracer={globalTracer}
                   onSetMonth={setGlobalMonth}
                   onSetQuarter={setGlobalQuarter}
                   onSetDay={setGlobalDay}
                   onSetUnit={setGlobalUnit}
                   onSetType={setGlobalType}
+                  onSetTracer={setGlobalTracer}
                   subFilter={explorerFilter}
+                  onSubViewChange={(sub) => {
+                    if (sub === 'overview') setView('dashboard');
+                    else if (sub === 'items_compliance') setView('indicators');
+                    else if (sub === 'auditors_share') setView('auditors');
+                    else if (sub === 'sectors_distribution') setView('sectors');
+                  }}
                 />
               )}
-              {view === 'explorer_units' && <UnitExplorer />}
+              {view === 'indicators' && (
+                <Dashboard 
+                  onExplore={() => setView('explorer_units')} 
+                  userUnit={userUnit} 
+                  isAdmin={isAdmin}
+                  globalMonth={globalMonth}
+                  globalQuarter={globalQuarter}
+                  globalDay={globalDay}
+                  globalUnit={globalUnit}
+                  globalType={globalType}
+                  globalTracer={globalTracer}
+                  onSetMonth={setGlobalMonth}
+                  onSetQuarter={setGlobalQuarter}
+                  onSetDay={setGlobalDay}
+                  onSetUnit={setGlobalUnit}
+                  onSetType={setGlobalType}
+                  onSetTracer={setGlobalTracer}
+                  subFilter="items"
+                  onSubViewChange={(sub) => {
+                    if (sub === 'overview') setView('dashboard');
+                    else if (sub === 'items_compliance') setView('indicators');
+                    else if (sub === 'auditors_share') setView('auditors');
+                    else if (sub === 'sectors_distribution') setView('sectors');
+                  }}
+                />
+              )}
+              {view === 'auditors' && (
+                <Dashboard 
+                  onExplore={() => setView('explorer_units')} 
+                  userUnit={userUnit} 
+                  isAdmin={isAdmin}
+                  globalMonth={globalMonth}
+                  globalQuarter={globalQuarter}
+                  globalDay={globalDay}
+                  globalUnit={globalUnit}
+                  globalType={globalType}
+                  globalTracer={globalTracer}
+                  onSetMonth={setGlobalMonth}
+                  onSetQuarter={setGlobalQuarter}
+                  onSetDay={setGlobalDay}
+                  onSetUnit={setGlobalUnit}
+                  onSetType={setGlobalType}
+                  onSetTracer={setGlobalTracer}
+                  subFilter="auditors"
+                  onSubViewChange={(sub) => {
+                    if (sub === 'overview') setView('dashboard');
+                    else if (sub === 'items_compliance') setView('indicators');
+                    else if (sub === 'auditors_share') setView('auditors');
+                    else if (sub === 'sectors_distribution') setView('sectors');
+                  }}
+                />
+              )}
+              {view === 'sectors' && (
+                <Dashboard 
+                  onExplore={() => setView('explorer_units')} 
+                  userUnit={userUnit} 
+                  isAdmin={isAdmin}
+                  globalMonth={globalMonth}
+                  globalQuarter={globalQuarter}
+                  globalDay={globalDay}
+                  globalUnit={globalUnit}
+                  globalType={globalType}
+                  globalTracer={globalTracer}
+                  onSetMonth={setGlobalMonth}
+                  onSetQuarter={setGlobalQuarter}
+                  onSetDay={setGlobalDay}
+                  onSetUnit={setGlobalUnit}
+                  onSetType={setGlobalType}
+                  onSetTracer={setGlobalTracer}
+                  subFilter="sectors"
+                  onSubViewChange={(sub) => {
+                    if (sub === 'overview') setView('dashboard');
+                    else if (sub === 'items_compliance') setView('indicators');
+                    else if (sub === 'auditors_share') setView('auditors');
+                    else if (sub === 'sectors_distribution') setView('sectors');
+                  }}
+                />
+              )}
+              {view === 'explorer_units' && <UnitExplorer isAdmin={isAdmin} userUnit={userUnit} />}
               {view === 'schedules' && <SchedulesSync />}
               {view === 'data_mgmt' && <DataManagement />}
-              {view === 'coleta' && <ColetaDigital user={user} />}
+              {view === 'coleta' && <ColetaDigital user={user} isAdmin={isAdmin} userUnit={userUnit} />}
               {view === 'explorer' && (
                 <AuditExplorer 
                   userUnit={userUnit} 
@@ -1047,11 +1534,13 @@ export default function App() {
                   globalDay={globalDay}
                   globalUnit={globalUnit}
                   globalType={globalType}
+                  globalTracer={globalTracer}
                   onSetMonth={setGlobalMonth}
                   onSetQuarter={setGlobalQuarter}
                   onSetDay={setGlobalDay}
                   onSetUnit={setGlobalUnit}
                   onSetType={setGlobalType}
+                  onSetTracer={setGlobalTracer}
                   sidebarFilter={explorerFilter}
                 />
               )}
@@ -1181,6 +1670,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Auditor Unit Selection Modal (mandatory for auditors without a unit or opened manually) */}
+      <AuditorUnitModal
+        isOpen={(!isAdmin && !userUnit && !!user) || isAuditorModalManualOpen}
+        userEmail={user?.email || ''}
+        userName={user?.displayName || ''}
+        onSave={handleSaveAuditorUnit}
+      />
+
     </div>
   );
 }
@@ -1190,24 +1687,58 @@ interface SidebarButtonProps {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  badge?: string;
+  isAction?: boolean;
 }
 
-function SidebarButton({ active, onClick, icon, label }: SidebarButtonProps) {
+function SidebarButton({ active, onClick, icon, label, badge, isAction }: SidebarButtonProps) {
+  if (isAction) {
+    return (
+      <button
+        onClick={onClick}
+        className={`
+          w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-200 group text-left cursor-pointer
+          ${active
+            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-950/20 ring-2 ring-white/30'
+            : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 hover:border-emerald-400/50'
+          }
+        `}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={`shrink-0 ${active ? 'text-white' : 'text-emerald-300'}`}>
+            {icon}
+          </span>
+          <span className="font-black tracking-wide truncate">{label}</span>
+        </div>
+        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 ${active ? 'bg-white text-emerald-800' : 'bg-emerald-400/20 text-emerald-200'}`}>
+          COLETA
+        </span>
+      </button>
+    );
+  }
+
   return (
     <button
       onClick={onClick}
       className={`
-        w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-200 group text-left cursor-pointer
+        w-full flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-200 group text-left cursor-pointer
         ${active 
           ? 'bg-white text-slate-900 shadow-md shadow-[#0a0b9e]/30' 
-          : 'text-blue-100 hover:text-white hover:bg-white/10'
+          : 'text-blue-100/90 hover:text-white hover:bg-white/10'
         }
       `}
     >
-      <span className={`transition-colors duration-200 ${active ? 'text-blue-600' : 'text-blue-200 group-hover:text-white'}`}>
-        {icon}
-      </span>
-      <span>{label}</span>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className={`shrink-0 transition-colors duration-200 ${active ? 'text-blue-600' : 'text-blue-200 group-hover:text-white'}`}>
+          {icon}
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+      {badge && (
+        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${active ? 'bg-blue-100 text-blue-700' : 'bg-white/15 text-white/80'}`}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

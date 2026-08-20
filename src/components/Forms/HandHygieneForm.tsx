@@ -10,10 +10,12 @@ interface Props {
   user: User;
   onComplete: () => void;
   editingAudit?: any;
+  isAdmin?: boolean;
+  userUnit?: string | null;
 }
 
-export default function HandHygieneForm({ user, onComplete, editingAudit }: Props) {
-  const [unitId, setUnitId] = useState('');
+export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmin = true, userUnit = null }: Props) {
+  const [unitId, setUnitId] = useState(userUnit || '');
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -198,16 +200,31 @@ export default function HandHygieneForm({ user, onComplete, editingAudit }: Prop
         q63_amostra_gratis_detectada_just: rData['64- Se sim, justifique:'] || rData['64- Se sim, justifique: '] || '',
       });
     } else {
+      const effectiveUnit = !isAdmin && userUnit ? userUnit : null;
+      if (effectiveUnit) {
+        setUnitId(effectiveUnit);
+        const found = HEALTH_UNITS.find(u => u.id === effectiveUnit);
+        setFormData(prev => ({
+          ...prev,
+          q1_hospital: found ? found.name : ''
+        }));
+      }
+
       const savedProfileStr = localStorage.getItem(`auditor_profile_${user.uid}`);
       if (savedProfileStr) {
         try {
           const profile = JSON.parse(savedProfileStr);
-          if (profile.defaultUnitId) {
+          if (profile.defaultUnitId && !effectiveUnit) {
             setUnitId(profile.defaultUnitId);
             const found = HEALTH_UNITS.find(u => u.id === profile.defaultUnitId);
             setFormData(prev => ({
               ...prev,
               q1_hospital: found ? found.name : '',
+              q5_auditor: profile.name || prev.q5_auditor
+            }));
+          } else if (profile.name) {
+            setFormData(prev => ({
+              ...prev,
               q5_auditor: profile.name || prev.q5_auditor
             }));
           }
@@ -216,7 +233,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit }: Prop
         }
       }
     }
-  }, [user.uid, editingAudit]);
+  }, [user.uid, editingAudit, isAdmin, userUnit]);
 
   const filteredUnits = HEALTH_UNITS.filter(u => TRACER_03_UNITS.includes(u.id));
 
@@ -707,14 +724,17 @@ export default function HandHygieneForm({ user, onComplete, editingAudit }: Prop
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">02- Nome do Hospital/Maternidade: *</label>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">
+                      02- Nome do Hospital/Maternidade: * {!isAdmin && userUnit && <span className="text-blue-600 font-black">(Vinculado ao seu perfil)</span>}
+                    </label>
                     <select 
                       value={unitId} 
                       onChange={(e) => handleUnitSelect(e.target.value)}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                      disabled={!isAdmin && !!userUnit}
+                      className={`w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none transition-all ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500 focus:bg-white'}`}
                     >
                       <option value="">Selecione uma unidade...</option>
-                      {filteredUnits.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {filteredUnits.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
 

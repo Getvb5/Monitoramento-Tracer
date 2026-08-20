@@ -10,10 +10,12 @@ interface Props {
   user: User;
   onComplete: () => void;
   editingAudit?: any;
+  isAdmin?: boolean;
+  userUnit?: string | null;
 }
 
-export default function SafeSurgeryForm({ user, onComplete, editingAudit }: Props) {
-  const [unitId, setUnitId] = useState('');
+export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmin = true, userUnit = null }: Props) {
+  const [unitId, setUnitId] = useState(userUnit || '');
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -201,16 +203,31 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit }: Prop
         q39_SR_justificativa: rData['Se não, justifique:_27'] || '',
       });
     } else {
+      const effectiveUnit = !isAdmin && userUnit ? userUnit : null;
+      if (effectiveUnit) {
+        setUnitId(effectiveUnit);
+        const found = HEALTH_UNITS.find(u => u.id === effectiveUnit);
+        setFormData(prev => ({
+          ...prev,
+          q1_hospital: found ? found.name : ''
+        }));
+      }
+
       const savedProfileStr = localStorage.getItem(`auditor_profile_${user.uid}`);
       if (savedProfileStr) {
         try {
           const profile = JSON.parse(savedProfileStr);
-          if (profile.defaultUnitId) {
+          if (profile.defaultUnitId && !effectiveUnit) {
             setUnitId(profile.defaultUnitId);
             const found = HEALTH_UNITS.find(u => u.id === profile.defaultUnitId);
             setFormData(prev => ({
               ...prev,
               q1_hospital: found ? found.name : '',
+              q4_auditor: profile.name || prev.q4_auditor
+            }));
+          } else if (profile.name) {
+            setFormData(prev => ({
+              ...prev,
               q4_auditor: profile.name || prev.q4_auditor
             }));
           }
@@ -219,7 +236,7 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit }: Prop
         }
       }
     }
-  }, [user.uid, editingAudit]);
+  }, [user.uid, editingAudit, isAdmin, userUnit]);
 
   const filteredUnits = HEALTH_UNITS.filter(u => TRACER_02_UNITS.includes(u.id));
 
@@ -548,17 +565,20 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit }: Prop
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">01. Nome do Hospital/Maternidade *</label>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                      01. Nome do Hospital/Maternidade * {!isAdmin && userUnit && <span className="text-blue-600 font-black">(Vinculado ao seu perfil)</span>}
+                    </label>
                     <select
                       value={unitId}
                       onChange={(e) => handleUnitSelect(e.target.value)}
-                      className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                      disabled={!isAdmin && !!userUnit}
+                      className={`w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md outline-none text-slate-800 transition-all ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500'}`}
                     >
                       <option value="">Selecione uma unidade...</option>
                       {filteredUnits.length > 0 ? (
-                        filteredUnits.map(u => <option key={u.id} value={u.id}>{u.name}</option>)
+                        filteredUnits.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => <option key={u.id} value={u.id}>{u.name}</option>)
                       ) : (
-                        HEALTH_UNITS.map(u => <option key={u.id} value={u.id}>{u.name}</option>)
+                        HEALTH_UNITS.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => <option key={u.id} value={u.id}>{u.name}</option>)
                       )}
                     </select>
                   </div>

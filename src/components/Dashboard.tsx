@@ -6,10 +6,14 @@ import { FALLBACK_HAND_AUDITS, FALLBACK_PATIENT_AUDITS, FALLBACK_SURGERY_AUDITS,
 import { 
   TrendingUp, ShieldCheck, Contact, LayoutList, ChevronRight,
   Clock, MapPin, Download, AlertTriangle, HelpCircle, Activity, LayoutGrid, CheckCircle2, XCircle,
-  BedDouble, Scissors, Pill, Syringe, Target, Award, Check
+  BedDouble, Scissors, Pill, Syringe, Target, Award, Check, Layers, Users, Building2, BarChart3
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { MONTH_NAMES, getTracerDateMonth, getTracerDateDay } from './AuditExplorer';
+import ItemComplianceStackedChart from './ItemComplianceStackedChart';
+import AuditorsParticipation from './AuditorsParticipation';
+import SectorDistribution from './SectorDistribution';
+import { calculateSectorDistribution, extractAuditSector } from '../lib/itemComplianceHelper';
 import {
   ResponsiveContainer,
   LineChart,
@@ -40,12 +44,15 @@ interface Props {
   globalDay?: string;
   globalUnit?: string;
   globalType?: string;
+  globalTracer?: string;
   onSetMonth?: (m: string) => void;
   onSetQuarter?: (q: string) => void;
   onSetDay?: (d: string) => void;
   onSetUnit?: (u: string) => void;
   onSetType?: (t: string) => void;
+  onSetTracer?: (t: string) => void;
   subFilter?: string;
+  onSubViewChange?: (view: 'overview' | 'items_compliance' | 'auditors_share' | 'sectors_distribution') => void;
 }
 
 function parseBRDate(str: string) {
@@ -114,18 +121,34 @@ export default function Dashboard({
   globalDay = '',
   globalUnit = '', 
   globalType = '',
+  globalTracer = '',
   onSetMonth,
   onSetQuarter,
   onSetDay,
   onSetUnit,
   onSetType,
-  subFilter = '' 
+  onSetTracer,
+  subFilter = '',
+  onSubViewChange
 }: Props) {
   const [handAudits, setHandAudits] = useState<any[]>([]);
   const [patientAudits, setPatientAudits] = useState<any[]>([]);
   const [surgeryAudits, setSurgeryAudits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [dashboardView, setDashboardView] = useState<'overview' | 'items_compliance' | 'auditors_share' | 'sectors_distribution'>('overview');
+
+  useEffect(() => {
+    if (subFilter === 'items' || subFilter === 'items_compliance') {
+      setDashboardView('items_compliance');
+    } else if (subFilter === 'auditors' || subFilter === 'auditors_share') {
+      setDashboardView('auditors_share');
+    } else if (subFilter === 'sectors' || subFilter === 'sectors_distribution') {
+      setDashboardView('sectors_distribution');
+    } else {
+      setDashboardView('overview');
+    }
+  }, [subFilter]);
 
   useEffect(() => {
     const handleRefresh = () => {
@@ -535,7 +558,7 @@ export default function Dashboard({
     let patients = patientAudits;
     let surgeries = surgeryAudits;
 
-    const targetUnit = globalUnit || (!isAdmin ? userUnit : '');
+    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     if (targetUnit) {
       const filter = (a: any) => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit;
       hands = hands.filter(filter);
@@ -587,33 +610,51 @@ export default function Dashboard({
       surgeries = surgeries.filter(pFilter);
     }
 
+    if (globalTracer === 'T01') {
+      hands = [];
+      surgeries = [];
+    } else if (globalTracer === 'T02') {
+      patients = [];
+      hands = [];
+    } else if (globalTracer === 'T03') {
+      patients = [];
+      surgeries = [];
+    }
+
     return {
       filteredHand: hands,
       filteredPatient: patients,
       filteredSurgery: surgeries
     };
-  }, [handAudits, patientAudits, surgeryAudits, isAdmin, userUnit, globalMonth, globalQuarter, globalDay, globalUnit, globalType]);
+  }, [handAudits, patientAudits, surgeryAudits, isAdmin, userUnit, globalMonth, globalQuarter, globalDay, globalUnit, globalType, globalTracer]);
 
   const advancedStats = useMemo(() => {
+    const sectorDistribution = calculateSectorDistribution(filteredPatient, filteredSurgery, filteredHand);
+    const topSectorObj = sectorDistribution[0];
+    const topSector = topSectorObj ? topSectorObj.sectorName : 'N/A';
+
     const combined = [...filteredHand, ...filteredPatient, ...filteredSurgery];
-    const totalCount = combined.length;
-    const sectorCounts: Record<string, number> = {};
     const professionalCounts: Record<string, number> = {};
 
     combined.forEach(a => {
-      const data = a.rawData || (a.sourceRowHash ? JSON.parse(a.sourceRowHash) : {});
-      
-      // Sector calculation
-      const sector = getRowValue(data, 'SETOR AUDITADO') || getRowValue(data, 'SETOR');
-      if (sector && sector !== '-' && typeof sector === 'string') {
-        const s = sector.trim().toUpperCase();
-        sectorCounts[s] = (sectorCounts[s] || 0) + 1;
-      }
+      const data = a.rawData || (a.sourceRowHash ? (typeof a.sourceRowHash === 'string' ? JSON.parse(a.sourceRowHash) : a.sourceRowHash) : {});
 
       // Professional Category calculation
-      let prof = a.professionalCategory || getRowValue(data, 'CATEGORIA PROFISSIONAL') || getRowValue(data, 'CATEGORIA') || getRowValue(data, 'FUNÇÃO') || getRowValue(data, 'CARGO');
+      let prof = a.professionalCategory;
       if (!prof || prof === '-' || typeof prof !== 'string') {
-        const auditor = getRowValue(data, 'NOME COMPLETO DO AUDITOR') || getRowValue(data, 'AUDITOR') || a.auditorName;
+        for (const [k, v] of Object.entries(data)) {
+          const kNorm = k.toLowerCase().replace(/^[0-9]+[-\s]+/, '').replace(/:$/, '').trim();
+          if (kNorm.includes('categoria profissional') || kNorm === 'categoria' || kNorm === 'cargo' || kNorm === 'funcao') {
+            if (v && typeof v === 'string' && v.trim() !== '' && v.trim() !== '-') {
+              prof = v.trim();
+              break;
+            }
+          }
+        }
+      }
+
+      if (!prof || prof === '-' || typeof prof !== 'string') {
+        const auditor = a.auditorName || a.auditor || data['06- Nome Completo do Auditor:'] || data['06- Nome Completo do Auditor'] || data['04- Nome Completo do Auditor:'];
         if (auditor && typeof auditor === 'string') {
           const lower = auditor.toLowerCase();
           if (lower.includes('enf') || lower.includes('tecn')) {
@@ -641,9 +682,6 @@ export default function Dashboard({
       professionalCounts[p] = (professionalCounts[p] || 0) + 1;
     });
 
-    const sortedSectors = Object.entries(sectorCounts).sort((a, b) => b[1] - a[1]);
-    const topSector = sortedSectors[0];
-
     const sortedProfs = Object.entries(professionalCounts).sort((a, b) => b[1] - a[1]);
     const topProfessional = sortedProfs[0];
 
@@ -653,8 +691,9 @@ export default function Dashboard({
     }
 
     return {
-      topSector: topSector ? topSector[0] : 'N/A',
-      topProfessional: topProfessionalStr
+      topSector,
+      topProfessional: topProfessionalStr,
+      sectorDistribution
     };
   }, [filteredHand, filteredPatient, filteredSurgery]);
 
@@ -728,14 +767,20 @@ export default function Dashboard({
   }, [complianceMetrics]);
 
   const unitsComplianceData = useMemo(() => {
+    const effectiveUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
+    const unitsList = effectiveUnit
+      ? HEALTH_UNITS.filter(u => u.id === effectiveUnit)
+      : HEALTH_UNITS;
+
     const unitStats: Record<string, { total: number; conforming: number; name: string }> = {};
 
-    HEALTH_UNITS.forEach(u => {
+    unitsList.forEach(u => {
       unitStats[u.id] = { total: 0, conforming: 0, name: u.name };
     });
 
     const addAuditToUnit = (unitId: string | undefined, conPoints: number, possPoints: number) => {
       if (!unitId) return;
+      if (effectiveUnit && unitId !== effectiveUnit) return;
       if (!unitStats[unitId]) {
         const found = HEALTH_UNITS.find(u => u.id === unitId);
         unitStats[unitId] = { total: 0, conforming: 0, name: found ? found.name : unitId };
@@ -780,7 +825,7 @@ export default function Dashboard({
       })
       .filter(u => u.volume > 0)
       .sort((a, b) => b.compliance - a.compliance);
-  }, [filteredPatient, filteredSurgery, filteredHand]);
+  }, [filteredPatient, filteredSurgery, filteredHand, isAdmin, globalUnit, userUnit]);
 
   const professionalDistributionData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -946,7 +991,7 @@ export default function Dashboard({
     let patients = patientAudits;
     let surgeries = surgeryAudits;
 
-    const targetUnit = globalUnit || (!isAdmin ? userUnit : '');
+    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     if (targetUnit) {
       const filter = (a: any) => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit;
       hands = hands.filter(filter);
@@ -1057,7 +1102,12 @@ export default function Dashboard({
 
     const multiplier = targetMonths.length;
 
-    return HEALTH_UNITS.map(unit => {
+    const effectiveUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
+    const unitsToTrack = effectiveUnit
+      ? HEALTH_UNITS.filter(u => u.id === effectiveUnit)
+      : HEALTH_UNITS;
+
+    return unitsToTrack.map(unit => {
       const filterByUnit = (audits: any[]) => audits.filter(a => 
         a.unitId === unit.id || a.hospitalId === unit.id || a.unidadeId === unit.id
       );
@@ -1107,7 +1157,7 @@ export default function Dashboard({
         progressPct: Math.min(100, (totalCount / targetTotal) * 100)
       };
     });
-  }, [defaultGoalMonth, globalQuarter, patientAudits, surgeryAudits, handAudits]);
+  }, [defaultGoalMonth, globalQuarter, patientAudits, surgeryAudits, handAudits, isAdmin, globalUnit, userUnit]);
 
   const primaryStats = [
     { label: 'T01 - Beira Leito', value: `${filteredPatient.length}`, icon: <BedDouble className="w-5 h-5 text-blue-600" />, color: 'text-blue-600', bg: 'bg-blue-50/50', border: 'border-blue-100', glow: 'shadow-blue-50/10' },
@@ -1121,65 +1171,175 @@ export default function Dashboard({
     { label: 'Categoria Profissional mais Ativa', value: advancedStats.topProfessional, icon: <Contact className="w-5 h-5 text-rose-600" />, color: 'text-rose-600', bg: 'bg-rose-50/50', border: 'border-rose-100', isLabel: true, sub: 'Categoria mais engajada nas auditorias' },
   ];
 
-  const tracerBreakdown = useMemo(() => [
-    { 
-      id: 'T01', 
-      name: 'Identificação Beira Leito', 
-      count: filteredPatient.length, 
-      color: 'bg-blue-500',
-      units: HEALTH_UNITS.map(u => ({
-        id: u.id,
-        name: u.name,
-        count: filteredPatient.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
-      })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
-    },
-    { 
-      id: 'T02', 
-      name: 'Processos Cirúrgicos', 
-      count: filteredSurgery.length, 
-      color: 'bg-amber-500',
-      units: HEALTH_UNITS.map(u => ({
-        id: u.id,
-        name: u.name,
-        count: filteredSurgery.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
-      })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
-    },
-    { 
-      id: 'T03', 
-      name: 'Higienização / Medicação', 
-      count: filteredHand.length, 
-      color: 'bg-indigo-500',
-      units: HEALTH_UNITS.map(u => ({
-        id: u.id,
-        name: u.name,
-        count: filteredHand.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
-      })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
-    }
-  ], [filteredHand, filteredPatient, filteredSurgery]);
+  const tracerBreakdown = useMemo(() => {
+    const effectiveUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
+    const unitsList = effectiveUnit
+      ? HEALTH_UNITS.filter(u => u.id === effectiveUnit)
+      : HEALTH_UNITS;
+
+    return [
+      { 
+        id: 'T01', 
+        name: 'Identificação Beira Leito', 
+        count: filteredPatient.length, 
+        color: 'bg-blue-500',
+        units: unitsList.map(u => ({
+          id: u.id,
+          name: u.name,
+          count: filteredPatient.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
+        })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
+      },
+      { 
+        id: 'T02', 
+        name: 'Processos Cirúrgicos', 
+        count: filteredSurgery.length, 
+        color: 'bg-amber-500',
+        units: unitsList.map(u => ({
+          id: u.id,
+          name: u.name,
+          count: filteredSurgery.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
+        })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
+      },
+      { 
+        id: 'T03', 
+        name: 'Higienização / Medicação', 
+        count: filteredHand.length, 
+        color: 'bg-indigo-500',
+        units: unitsList.map(u => ({
+          id: u.id,
+          name: u.name,
+          count: filteredHand.filter(a => a.unitId === u.id || a.hospitalId === u.id || a.unidadeId === u.id).length
+        })).filter(u => u.count > 0).sort((a,b) => b.count - a.count).slice(0, 5)
+      }
+    ];
+  }, [filteredHand, filteredPatient, filteredSurgery, isAdmin, globalUnit, userUnit]);
 
   if (loading) return <div className="h-64 flex items-center justify-center text-neutral-400 font-bold uppercase tracking-tight">Carregando painel de métricas...</div>;
 
   return (
     <div className="space-y-6">
-      {/* Export Action Button Row (Clean, minimal, space-saving layout under layout header) */}
-      <div className="flex flex-col items-end gap-2 pt-1">
-        <button
-          id="export-pdf-dashboard-btn"
-          onClick={handleExportPDF}
-          disabled={exporting}
-          className="group flex items-center gap-2 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-200 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-200 shadow-sm border border-slate-950 cursor-pointer"
-        >
-          <Download className="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-y-0.5" />
-          {exporting ? 'Gerando Documento...' : 'Exportar PDF'}
-        </button>
-        {exportError && (
-          <div className="text-rose-600 font-bold bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-xl text-[10px] uppercase tracking-wider flex items-center gap-2 shadow-sm animate-pulse">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>{exportError}</span>
-          </div>
-        )}
+      {/* Dashboard View Mode Selector & Export Row */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-b border-slate-200/80 pb-4">
+        {/* Navigation Tabs */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/90 p-1.5 rounded-xl border border-slate-200/60 shadow-xs">
+          <button
+            onClick={() => {
+              setDashboardView('overview');
+              onSubViewChange?.('overview');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+              dashboardView === 'overview'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            Visão Geral
+          </button>
+
+          <button
+            onClick={() => {
+              setDashboardView('items_compliance');
+              onSubViewChange?.('items_compliance');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+              dashboardView === 'items_compliance'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            Conformidade por Item
+          </button>
+
+          <button
+            onClick={() => {
+              setDashboardView('auditors_share');
+              onSubViewChange?.('auditors_share');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+              dashboardView === 'auditors_share'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            Participação de Auditores
+          </button>
+
+          <button
+            onClick={() => {
+              setDashboardView('sectors_distribution');
+              onSubViewChange?.('sectors_distribution');
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+              dashboardView === 'sectors_distribution'
+                ? 'bg-violet-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            Distribuição por Setor
+          </button>
+        </div>
+
+        {/* Export PDF Button */}
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          <button
+            id="export-pdf-dashboard-btn"
+            onClick={handleExportPDF}
+            disabled={exporting}
+            className="group flex items-center gap-2 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-200 text-white px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-200 shadow-sm border border-slate-950 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-y-0.5" />
+            {exporting ? 'Gerando...' : 'Exportar PDF'}
+          </button>
+          {exportError && (
+            <div className="text-rose-600 font-bold bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-xl text-[10px] uppercase tracking-wider flex items-center gap-2 shadow-sm animate-pulse">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{exportError}</span>
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Render Dedicated Indicator Views if Selected */}
+      {dashboardView === 'items_compliance' && (
+        <ItemComplianceStackedChart
+          patientAudits={filteredPatient}
+          surgeryAudits={filteredSurgery}
+          handAudits={filteredHand}
+          unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+          selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+          globalTracer={globalTracer}
+        />
+      )}
+
+      {dashboardView === 'auditors_share' && (
+        <AuditorsParticipation
+          patientAudits={filteredPatient}
+          surgeryAudits={filteredSurgery}
+          handAudits={filteredHand}
+          unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+          selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+          globalTracer={globalTracer}
+        />
+      )}
+
+      {dashboardView === 'sectors_distribution' && (
+        <SectorDistribution
+          patientAudits={filteredPatient}
+          surgeryAudits={filteredSurgery}
+          handAudits={filteredHand}
+          unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+          selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+          globalTracer={globalTracer}
+        />
+      )}
+
+      {/* Render Overview Dashboard */}
+      {dashboardView === 'overview' && (
+        <>
       {/* Executive Primary Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {primaryStats.map((s: any, i) => (
@@ -1779,6 +1939,84 @@ export default function Dashboard({
           )}
         </div>
       </div>
+
+      {/* Section Divider & Embedded Item Compliance from image.png */}
+      <div className="pt-2">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+              <Layers className="w-4 h-4 text-emerald-600" />
+              Conformidade por Item Verificado de Cada Tracer
+            </h3>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+              Distribuição percentual de Sim, Não e Não se aplica por questão conforme padrão dos formulários
+            </p>
+          </div>
+          <button
+            onClick={() => setDashboardView('items_compliance')}
+            className="text-[10px] font-black text-emerald-700 hover:text-emerald-800 uppercase tracking-wider flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+          >
+            Ver em tela cheia <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        
+        <ItemComplianceStackedChart
+          patientAudits={filteredPatient}
+          surgeryAudits={filteredSurgery}
+          handAudits={filteredHand}
+          unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+          selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+        />
+      </div>
+
+      {/* Embedded Auditors & Sector Distribution Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 pt-2">
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+              <Users className="w-4 h-4 text-blue-600" />
+              Percentual de Auditores por Tracer
+            </h3>
+            <button
+              onClick={() => setDashboardView('auditors_share')}
+              className="text-[10px] font-black text-blue-700 hover:text-blue-800 uppercase tracking-wider flex items-center gap-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            >
+              Expandir <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+          <AuditorsParticipation
+            patientAudits={filteredPatient}
+            surgeryAudits={filteredSurgery}
+            handAudits={filteredHand}
+            unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+            selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-violet-600" />
+              Distribuição de Auditorias por Setor
+            </h3>
+            <button
+              onClick={() => setDashboardView('sectors_distribution')}
+              className="text-[10px] font-black text-violet-700 hover:text-violet-800 uppercase tracking-wider flex items-center gap-1 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+            >
+              Expandir <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+          <SectorDistribution
+            patientAudits={filteredPatient}
+            surgeryAudits={filteredSurgery}
+            handAudits={filteredHand}
+            unitName={HEALTH_UNITS.find(u => u.id === (isAdmin ? globalUnit : userUnit))?.name}
+            selectedMonthName={globalMonth !== '' ? MONTH_NAMES[parseInt(globalMonth)] : ''}
+          />
+        </div>
+      </div>
+      </>
+      )}
 
 
 
