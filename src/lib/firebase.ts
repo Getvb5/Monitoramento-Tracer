@@ -4,9 +4,12 @@ import {
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
-  disableNetwork 
+  disableNetwork,
+  setLogLevel
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
+
+setLogLevel('error');
 
 const app = initializeApp(firebaseConfig);
 

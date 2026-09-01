@@ -3,7 +3,7 @@ import { db } from '../../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_03_UNITS } from '../../lib/utils';
-import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Pill } from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Pill, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
@@ -477,31 +477,9 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
 
       // Compliance is strictly tied to Hand Hygiene check (Yes)
       const compliantBool = formData.q18_higienizacao_maos === 'Sim';
+      const activeDocId = editingAudit?.id || ('aud_h_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
 
-      const dbPayload = {
-        unitId,
-        auditorId: user.uid,
-        compliant: compliantBool,
-        rawData,
-        sourceRowHash: JSON.stringify(rawData),
-        tracerNumber: '03',
-        tracerName: 'Processos Seguros de Medicação',
-        timestamp: serverTimestamp(),
-      };
-
-      let activeDocId = '';
-      if (editingAudit && editingAudit.id && !editingAudit.id.startsWith('local_')) {
-        const { doc, setDoc } = await import('firebase/firestore');
-        await setDoc(doc(db, 'audits_hand_hygiene', editingAudit.id), {
-          ...dbPayload,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-        activeDocId = editingAudit.id;
-      } else {
-        const docRef = await addDoc(collection(db, 'audits_hand_hygiene'), dbPayload);
-        activeDocId = docRef.id;
-      }
-
+      // 1. Immediately persist locally
       try {
         const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
         saveCustomLocalAudit({
@@ -520,39 +498,13 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
       } catch (saveLocalErr) {
         console.error("Local shadow save failed", saveLocalErr);
       }
-      onComplete();
-    } catch (err: any) {
-      if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit') || err.message === 'quota-exceeded')) {
-        localStorage.setItem('firestore_quota_exceeded', 'true');
-        window.dispatchEvent(new Event('firestore-quota-exceeded'));
-        
-        try {
-          const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
-          const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
-          const rawData: Record<string, string> = {
-            '02- Nome do Hospital/Maternidade:': unitName,
-            '03- Data do Tracer:': formData.q2_data,
-            '04- Horário do Início do Tracer:': formData.q3_horario,
-            '05- Setor Auditado:': formData.q4_setor,
-            '06- Nome Completo do Auditor:': formData.q5_auditor,
-            '07- Nome Completo do Paciente:': formData.q6_paciente,
-            '08- Nº do Prontuário do Paciente:': formData.q7_prontuario,
-            '09- Paciente identificado com pulseira branca?': formData.q8_pulseira_branca,
-            '11- A pulseira de identificação está legível?': formData.q10_pulseira_legivel,
-            '13- A pulseira de identificação preenchida adequadamente?': formData.q12_pulseira_preenchida,
-            '15- O paciente tem alergia alimentar/medicamentosa?': formData.q14_alergia,
-            '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?': formData.q17_orientacao_paciente,
-            '19- Houve higienização das mãos imediatamente antes da administração da medicação?': formData.q18_higienizacao_maos,
-            '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q20_acesso_venoso,
-            '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?': formData.q22_conferencia_pulseira,
-            '25- Houve conferência do medicamento administrado com a prescrição?': formData.q24_conferencia_prescricao,
-            '26- Realizada dupla checagem no momento de administração da MAV?': formData.q25_dupla_checagem,
-            '28- O rótulo de medicação está com todos os identificadores obrigatórios?': formData.q27_rotulo_obrigatorios,
-          };
-          const compliantBool = formData.q18_higienizacao_maos === 'Sim';
 
-          saveCustomLocalAudit({
-            id: editingAudit?.id || ('local_h_' + Date.now()),
+      // 2. Synchronize to Firestore with race timeout
+      const syncToFirestore = async () => {
+        if (localStorage.getItem('firestore_quota_exceeded') === 'true') return;
+        try {
+          const { doc, setDoc } = await import('firebase/firestore');
+          await setDoc(doc(db, 'audits_hand_hygiene', activeDocId), {
             unitId,
             auditorId: user.uid,
             compliant: compliantBool,
@@ -560,18 +512,27 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
             sourceRowHash: JSON.stringify(rawData),
             tracerNumber: '03',
             tracerName: 'Processos Seguros de Medicação',
-            type: 'T03',
-            competencia: editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(new Date())}/${new Date().getFullYear()}`,
-            timestampStr: editingAudit?.timestampStr || new Date().toISOString()
-          });
-          onComplete();
-        } catch (saveErr) {
-          console.error("Local save failed", saveErr);
-          setError('Erro ao salvar auditoria localmente');
+            timestamp: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err: any) {
+          console.warn('[HandHygieneForm] Firestore save notice:', err?.message || err);
+          if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted'))) {
+            localStorage.setItem('firestore_quota_exceeded', 'true');
+            window.dispatchEvent(new Event('firestore-quota-exceeded'));
+          }
         }
-      } else {
-        setError('Erro ao salvar auditoria: ' + err.message);
-      }
+      };
+
+      await Promise.race([
+        syncToFirestore(),
+        new Promise(resolve => setTimeout(resolve, 600))
+      ]);
+
+      onComplete();
+    } catch (err: any) {
+      console.error('Error in save:', err);
+      onComplete();
     } finally {
       setSubmitting(false);
     }
@@ -926,7 +887,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
                 type="button"
                 disabled={submitting}
                 onClick={handleBack}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition-all cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition-all cursor-pointer disabled:opacity-50"
               >
                 <ChevronLeft className="w-4 h-4" />
                 Voltar
@@ -946,18 +907,21 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
               <button
                 type="submit"
                 disabled={submitting}
-                className={`flex-1 flex items-center justify-center gap-2 py-3.5 px-4 font-black text-xs uppercase tracking-widest rounded-xl transition-all ${
+                className={`flex-1 flex items-center justify-center gap-2 py-3.5 px-4 font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-md shrink-0 cursor-pointer ${
                   submitting
-                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-150 cursor-pointer'
+                    ? 'bg-indigo-400 text-white opacity-90 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-[0.98]'
                 }`}
               >
                 {submitting ? (
-                  'Salvando...'
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Salvando...</span>
+                  </>
                 ) : (
                   <>
                     <Save className="w-5 h-5" />
-                    Enviar Coleta do Tracer
+                    <span>Enviar Coleta do Tracer</span>
                   </>
                 )}
               </button>

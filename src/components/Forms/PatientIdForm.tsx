@@ -3,7 +3,7 @@ import { db } from '../../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_01_UNITS } from '../../lib/utils';
-import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck } from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
@@ -375,34 +375,9 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
     };
 
     try {
-      const dbPayload = {
-        unitId,
-        auditorId: user.uid,
-        ...scorePayload,
-        rawData,
-        sourceRowHash: JSON.stringify(rawData),
-        tracerNumber: '01',
-        tracerName: 'Beira Leito',
-        timestamp: serverTimestamp(),
-      };
+      const activeDocId = editingAudit?.id || ('aud_p_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
 
-      if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-        throw new Error('quota-exceeded');
-      }
-
-      let activeDocId = '';
-      if (editingAudit && editingAudit.id && !editingAudit.id.startsWith('local_')) {
-        const { doc, setDoc } = await import('firebase/firestore');
-        await setDoc(doc(db, 'audits_patient_id', editingAudit.id), {
-          ...dbPayload,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-        activeDocId = editingAudit.id;
-      } else {
-        const docRef = await addDoc(collection(db, 'audits_patient_id'), dbPayload);
-        activeDocId = docRef.id;
-      }
-
+      // 1. Immediately persist locally (instantaneous - zero lag)
       try {
         const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
         saveCustomLocalAudit({
@@ -421,32 +396,42 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
       } catch (saveLocalErr) {
         console.error("Local shadow save failed", saveLocalErr);
       }
+
+      // 2. Synchronize to Firestore in non-blocking / fast-timeout manner
+      const syncToFirestore = async () => {
+        if (localStorage.getItem('firestore_quota_exceeded') === 'true') return;
+        try {
+          const { doc, setDoc } = await import('firebase/firestore');
+          await setDoc(doc(db, 'audits_patient_id', activeDocId), {
+            unitId,
+            auditorId: user.uid,
+            ...scorePayload,
+            rawData,
+            sourceRowHash: JSON.stringify(rawData),
+            tracerNumber: '01',
+            tracerName: 'Beira Leito',
+            timestamp: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err: any) {
+          console.warn('[PatientIdForm] Firestore save notice:', err?.message || err);
+          if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted'))) {
+            localStorage.setItem('firestore_quota_exceeded', 'true');
+            window.dispatchEvent(new Event('firestore-quota-exceeded'));
+          }
+        }
+      };
+
+      // Ensure user doesn't wait more than 600ms even on slow network
+      await Promise.race([
+        syncToFirestore(),
+        new Promise(resolve => setTimeout(resolve, 600))
+      ]);
+
       onComplete();
     } catch (err: any) {
-      // Offline fallback & quota handling
-      localStorage.setItem('firestore_quota_exceeded', 'true');
-      window.dispatchEvent(new Event('firestore-quota-exceeded'));
-      
-      try {
-        const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
-        saveCustomLocalAudit({
-          id: editingAudit?.id || ('local_p_' + Date.now()),
-          unitId,
-          auditorId: user.uid,
-          tracerNumber: '01',
-          tracerName: 'Beira Leito',
-          type: 'T01',
-          ...scorePayload,
-          rawData,
-          sourceRowHash: JSON.stringify(rawData),
-          timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-          competencia: editingAudit?.competencia || 'mai./2026'
-        });
-        onComplete();
-      } catch (saveErr) {
-        console.error("Local recovery save failed", saveErr);
-        setError('Erro ao salvar auditoria no cache offline.');
-      }
+      console.error('Error in save:', err);
+      onComplete();
     } finally {
       setSubmitting(false);
     }
@@ -959,29 +944,28 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
             </AnimatePresence>
           </div>
 
+          {/* Validation Error Banner */}
+          {error && (
+            <div className="flex items-center gap-2 p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold uppercase tracking-wide animate-pulse">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <span className="flex-1 leading-snug">{error}</span>
+            </div>
+          )}
+
           {/* Footer Navigation Bar */}
-          <div className="border-t border-slate-100 bg-slate-50/55 p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mt-8">
-            <div className="flex items-center gap-1.5 shrink-0">
-              {error && (
-                <span className="text-[10px] text-red-500 font-extrabold uppercase flex items-center gap-1 animate-pulse">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error}
-                </span>
-              )}
-              {!error && (
-                <span className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                  Preenchimento assistido inteligente
-                </span>
-              )}
+          <div className="border-t border-slate-100 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
+            <div className="hidden sm:flex items-center gap-1.5 text-[9.5px] text-slate-400 font-bold uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              Preenchimento assistido inteligente
             </div>
 
-            <div className="flex items-center gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end sm:ml-auto">
               {currentStep > 1 && (
                 <button
                   type="button"
                   onClick={handleBack}
-                  className="w-1/2 sm:w-auto px-4 py-2.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-black uppercase rounded-md tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                  disabled={submitting}
+                  className="flex-1 sm:flex-initial px-5 py-2.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-black uppercase rounded-lg tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   Anterior
@@ -992,7 +976,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                 <button
                   type="button"
                   onClick={handleNext}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 border border-slate-900 text-white hover:bg-slate-800 text-xs font-black uppercase rounded-md tracking-wider flex items-center justify-center gap-1.5 transition-all ml-auto shadow cursor-pointer"
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-slate-900 border border-slate-900 text-white hover:bg-slate-800 text-xs font-black uppercase rounded-lg tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer ml-auto sm:ml-0"
                 >
                   Próximo
                   <ChevronRight className="w-4 h-4" />
@@ -1001,18 +985,21 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                 <button
                   type="submit"
                   disabled={submitting}
-                  className={`w-full sm:w-auto px-6 py-2.5 text-white text-xs font-black uppercase rounded-md tracking-widest flex items-center justify-center gap-2 transition-all ml-auto shadow ${
+                  className={`flex-1 sm:flex-initial px-6 py-2.5 text-white text-xs font-black uppercase rounded-lg tracking-wider flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer ml-auto sm:ml-0 ${
                     submitting
-                      ? 'bg-slate-350 cursor-not-allowed'
-                      : 'bg-red-600 hover:bg-red-700 shadow-md hover:shadow-lg'
+                      ? 'bg-red-400 cursor-not-allowed opacity-90'
+                      : 'bg-red-600 hover:bg-red-700 active:scale-[0.98]'
                   }`}
                 >
                   {submitting ? (
-                    'Salvando Instrumento...'
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white shrink-0" />
+                      <span>Salvando...</span>
+                    </>
                   ) : (
                     <>
-                      <Save className="w-4.5 h-4.5" />
-                      Registrar Auditoria
+                      <Save className="w-4 h-4 shrink-0" />
+                      <span>Registrar Auditoria</span>
                     </>
                   )}
                 </button>
