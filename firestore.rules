@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email.matches('(?i)^.*(admin|gestao|qualidade|getvb98@gmail.com|saude.recife.pe.gov.br).*$') ||
+        request.auth.token.email == 'getvb98@gmail.com'
+      );
+    }
+
+    function isAuthorizedAuditor(data) {
+      return isSignedIn() && (
+        isAdmin() ||
+        data.auditorId == request.auth.uid || 
+        data.auditorId == 'SYSTEM_SYNC'
+      );
+    }
+
+    // Audits - Hand Hygiene
+    match /audits_hand_hygiene/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
+    }
+
+    // Audits - Patient ID
+    match /audits_patient_id/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
+    }
+
+    // Audits - Safe Surgery
+    match /audits_safe_surgery/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isAdmin() || request.resource.data.auditorId == request.auth.uid || request.resource.data.auditorId == 'SYSTEM_SYNC');
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.auditorId == request.auth.uid);
+    }
+
+    // Escalas OSS
+    match /escalas_oss/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isAuthorizedAuditor(request.resource.data);
+    }
+
+    // Units
+    match /units/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Auditors
+    match /auditors/{id} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (id == request.auth.uid || isAdmin());
+    }
+
+    // Test connectivity
+    match /test/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

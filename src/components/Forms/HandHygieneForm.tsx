@@ -1,0 +1,970 @@
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { User } from 'firebase/auth';
+import { HEALTH_UNITS, TRACER_03_UNITS } from '../../lib/utils';
+import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Pill } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface Props {
+  user: User;
+  onComplete: () => void;
+  editingAudit?: any;
+  isAdmin?: boolean;
+  userUnit?: string | null;
+}
+
+export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmin = true, userUnit = null }: Props) {
+  const [unitId, setUnitId] = useState(userUnit || '');
+  const [currentStep, setCurrentStep] = useState(1);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getCurrentTimeStr = () => {
+    const d = new Date();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
+  // State covering all 64 Questions for Tracer 03 Medication Safety
+  const [formData, setFormData] = useState({
+    // Section 1: Identificação Coleta
+    q1_hospital: '',
+    q2_data: getTodayDateStr(),
+    q3_horario: getCurrentTimeStr(),
+    q4_setor: '',
+    q5_auditor: user.displayName || '',
+    q6_paciente: '',
+    q7_prontuario: '',
+
+    // Section 2: Identificação do Paciente e Alergias
+    q8_pulseira_branca: '',
+    q9_pulseira_branca_just: '',
+    q10_pulseira_legivel: '',
+    q11_pulseira_legivel_just: '',
+    q12_pulseira_preenchida: '',
+    q13_pulseira_preenchida_just: '',
+    q14_alergia: '',
+    q15_alergia_sinalizada: '',
+    q16_alergia_just: '',
+
+    // Section 3: Preparo, Administração e Linhas
+    q17_orientacao_paciente: '',
+    q18_higienizacao_maos: '',
+    q19_higienizacao_maos_just: '',
+    q20_acesso_venoso: '',
+    q21_acesso_venoso_just: '',
+    q22_conferencia_pulseira: '',
+    q23_conferencia_pulseira_just: '',
+    q24_conferencia_prescricao: '',
+    q25_dupla_checagem: '',
+    q26_dupla_checagem_just: '',
+    q27_rotulo_obrigatorios: '',
+    q28_rotulo_obrigatorios_just: '',
+
+    // Section 4: Prescrição Médica e Segurança
+    q29_assinatura_medico: '',
+    q30_assinatura_medico_just: '',
+    q31_assinatura_enfermeiro: '',
+    q32_assinatura_enfermeiro_just: '',
+    q33_hora_correta: '',
+    q34_hora_correta_just: '',
+    q35_sem_abreviaturas: '',
+    q36_diferenciar_semelhantes: '',
+    q37_diferenciar_semelhantes_just: '',
+    q38_registro_alergias: '',
+    q39_registro_alergias_just: '',
+    q40_duracao_especificada: '',
+    q41_se_necessario_seguranca: '',
+    q42_se_necessario_seguranca_just: '',
+    q43_diluente_prescrito: '',
+    q44_velocidade_prescrita: '',
+    q45_velocidade_prescrita_just: '',
+    q46_via_prescrita: '',
+    q47_via_prescrita_just: '',
+
+    // Section 5: Administração e Armazenamento / Setor
+    q48_nao_administrada: '',
+    q49_nao_administrada_just: '',
+    q50_dose_checada: '',
+    q51_dose_checada_just: '',
+    q52_mav_acesso_restrito: '',
+    q53_mav_acesso_restrito_just: '',
+    q54_lista_mav_disponivel: '',
+    q55_lista_mav_disponivel_just: '',
+    q56_temperatura_refrigeracao: '',
+    q57_temperatura_refrigeracao_just: '',
+    q58_lista_refrigerados_disponivel: '',
+    q59_lista_refrigerados_disponivel_just: '',
+    q60_medicacao_casa_registrada: '',
+    q61_medicacao_casa_registrada_just: '',
+    q62_amostra_gratis_detectada: '',
+    q63_amostra_gratis_detectada_just: '',
+  });
+
+  useEffect(() => {
+    if (editingAudit) {
+      let rData: Record<string, string> = editingAudit.rawData || {};
+      if (!editingAudit.rawData && editingAudit.sourceRowHash) {
+        try {
+          rData = JSON.parse(editingAudit.sourceRowHash);
+        } catch (e) {
+          console.error("Failed to parse sourceRowHash in form", e);
+        }
+      }
+
+      // Pre-fill hospital
+      const matchedUnit = HEALTH_UNITS.find(u => u.name === rData['02- Nome do Hospital/Maternidade:'] || u.name === rData['02- Nome do Hospital/Maternidade']);
+      if (matchedUnit) {
+        setUnitId(matchedUnit.id);
+      } else if (editingAudit.unitId) {
+        setUnitId(editingAudit.unitId);
+      }
+
+      setFormData({
+        q1_hospital: rData['02- Nome do Hospital/Maternidade:'] || rData['02- Nome do Hospital/Maternidade'] || '',
+        q2_data: rData['03- Data do Tracer:'] || rData['03- Data do Tracer'] || getTodayDateStr(),
+        q3_horario: rData['04- Horário do Início do Tracer:'] || rData['04- Horário do Início do Tracer'] || getCurrentTimeStr(),
+        q4_setor: rData['05- Setor Auditado:'] || rData['05- Setor Auditado'] || '',
+        q5_auditor: rData['06- Nome Completo do Auditor:'] || rData['06- Nome Completo do Auditor'] || '',
+        q6_paciente: rData['07- Nome Completo do Paciente:'] || rData['07- Nome Completo do Paciente'] || rData['07- Nome do paciente:'] || rData['07- Nome do paciente'] || '',
+        q7_prontuario: rData['08- Nº do Prontuário do Paciente:'] || rData['08- Nº do Prontuário do Paciente'] || '',
+
+        q8_pulseira_branca: rData['09- Paciente identificado com pulseira branca?'] || '',
+        q9_pulseira_branca_just: rData['10- Se não, justifique:'] || rData['10- Se não, justifique: '] || '',
+        q10_pulseira_legivel: rData['11- A pulseira de identificação está legível?'] || '',
+        q11_pulseira_legivel_just: rData['12- Se não, justifique:'] || rData['12- Se não, justifique: '] || '',
+        q12_pulseira_preenchida: rData['13- A pulseira de identificação preenchida adequadamente?'] || '',
+        q13_pulseira_preenchida_just: rData['14- Se não, justifique:'] || rData['14- Se não, justifique: '] || '',
+        q14_alergia: rData['15- O paciente tem alergia alimentar/medicamentosa?'] || '',
+        q15_alergia_sinalizada: rData['16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?'] || '',
+        q16_alergia_just: rData['17- Se não, justifique:'] || rData['17- Se não, justifique: '] || '',
+
+        q17_orientacao_paciente: rData['18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?'] || '',
+        q18_higienizacao_maos: rData['19- Houve higienização das mãos imediatamente antes da administração da medicação?'] || rData['19- Houve higienização das mãos imediatamente antes da administração da medicação? '] || '',
+        q19_higienizacao_maos_just: rData['20- Se não, justifique:'] || rData['20- Se não, justifique: '] || '',
+        q20_acesso_venoso: rData['21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?'] || '',
+        q21_acesso_venoso_just: rData['22- Se não, justifique:'] || rData['22- Se não, justifique: '] || '',
+        q22_conferencia_pulseira: rData['23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?'] || '',
+        q23_conferencia_pulseira_just: rData['24- Se não, justifique:'] || rData['24- Se não, justifique: '] || '',
+        q24_conferencia_prescricao: rData['25- Houve conferência do medicamento administrado com a prescrição?'] || '',
+        q25_dupla_checagem: rData['26- Realizada dupla checagem no momento de administração da MAV?'] || '',
+        q26_dupla_checagem_just: rData['27- Se não, justifique:'] || rData['27- Se não, justifique: '] || '',
+        q27_rotulo_obrigatorios: rData['28- O rótulo de medicação está com todos os identificadores obrigatórios?'] || '',
+        q28_rotulo_obrigatorios_just: rData['29- Se não, justifique:'] || rData['29- Se não, justifique: '] || '',
+
+        q29_assinatura_medico: rData['30- Prescrição com assinatura do médico?'] || '',
+        q30_assinatura_medico_just: rData['31- Se não, justifique:'] || rData['31- Se não, justifique: '] || '',
+        q31_assinatura_enfermeiro: rData['32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?'] || '',
+        q32_assinatura_enfermeiro_just: rData['33- Se não, justifique:'] || rData['33- Se não, justifique: '] || '',
+        q33_hora_correta: rData['34- A hora da administração da medicação é a mesma da prescrição?'] || '',
+        q34_hora_correta_just: rData['35- Se não, justifique:'] || rData['35- Se não, justifique: '] || '',
+        q35_sem_abreviaturas: rData['36- A prescrição está SEM USO DE ABREVIATURAS?'] || '',
+        q36_diferenciar_semelhantes: rData['37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)'] || '',
+        q37_diferenciar_semelhantes_just: rData['38- Se não, justifique:'] || rData['38- Se não, justifique: '] || '',
+        q38_registro_alergias: rData['39- Há registros das alergias medicamentosas na prescrição?'] || '',
+        q39_registro_alergias_just: rData['40- Se não, justifique:'] || rData['40- Se não, justifique: '] || '',
+        q40_duracao_especificada: rData['41- A duração do tratamento está especificada?'] || '',
+        q41_se_necessario_seguranca: rData['42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?'] || '',
+        q42_se_necessario_seguranca_just: rData['43- Se não, justifique:'] || rData['43- Se não, justifique: '] || '',
+        q43_diluente_prescrito: rData['44- O diluente da medicação está prescrito?'] || '',
+        q44_velocidade_prescrita: rData['45- A velocidade de infusão está prescrita?'] || '',
+        q45_velocidade_prescrita_just: rData['46- Se não, justifique:'] || rData['46- Se não, justifique: '] || '',
+        q46_via_prescrita: rData['47- A via de administração está prescrita?'] || '',
+        q47_via_prescrita_just: rData['48- Se não, justifique:'] || rData['48- Se não, justifique: '] || '',
+
+        q48_nao_administrada: rData['49- Alguma medicação não administrada conforme prescrição?'] || '',
+        q49_nao_administrada_just: rData['50- Se não, justifique:'] || rData['50- Se não, justifique: '] || '',
+        q50_dose_checada: rData['51- A dose administrada foi checada de forma legível após a administração da medicação?'] || '',
+        q51_dose_checada_just: rData['52- Se não, justifique:'] || rData['52- Se não, justifique: '] || '',
+        q52_mav_acesso_restrito: rData['53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?'] || '',
+        q53_mav_acesso_restrito_just: rData['54- Se não, justifique:'] || rData['54- Se não, justifique: '] || '',
+        q54_lista_mav_disponivel: rData['55- Lista de medicações de alta vigilância (MAV) disponível no setor?'] || '',
+        q55_lista_mav_disponivel_just: rData['56- Se não, justifique:'] || rData['56- Se não, justifique: '] || '',
+        q56_temperatura_refrigeracao: rData['57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?'] || '',
+        q57_temperatura_refrigeracao_just: rData['58- Se não, justifique:'] || rData['58- Se não, justifique: '] || '',
+        q58_lista_refrigerados_disponivel: rData['59- Lista de medicações refrigeradas disponível no setor?'] || '',
+        q59_lista_refrigerados_disponivel_just: rData['60- Se não, justifique:'] || rData['60- Se não, justifique: '] || '',
+        q60_medicacao_casa_registrada: rData['61- Medicação trazida de casa registrada na prescrição del paciente?'] || rData['61- Medicação trazida de casa registrada na prescrição do paciente?'] || '',
+        q61_medicacao_casa_registrada_just: rData['62- Se não, justifique:'] || rData['62- Se não, justifique: '] || '',
+        q62_amostra_gratis_detectada: rData['63- Alguma amostra grátis detectada no setor?'] || '',
+        q63_amostra_gratis_detectada_just: rData['64- Se sim, justifique:'] || rData['64- Se sim, justifique: '] || '',
+      });
+    } else {
+      const effectiveUnit = !isAdmin && userUnit ? userUnit : null;
+      if (effectiveUnit) {
+        setUnitId(effectiveUnit);
+        const found = HEALTH_UNITS.find(u => u.id === effectiveUnit);
+        setFormData(prev => ({
+          ...prev,
+          q1_hospital: found ? found.name : ''
+        }));
+      }
+
+      const savedProfileStr = localStorage.getItem(`auditor_profile_${user.uid}`);
+      if (savedProfileStr) {
+        try {
+          const profile = JSON.parse(savedProfileStr);
+          if (profile.defaultUnitId && !effectiveUnit) {
+            setUnitId(profile.defaultUnitId);
+            const found = HEALTH_UNITS.find(u => u.id === profile.defaultUnitId);
+            setFormData(prev => ({
+              ...prev,
+              q1_hospital: found ? found.name : '',
+              q5_auditor: profile.name || prev.q5_auditor
+            }));
+          } else if (profile.name) {
+            setFormData(prev => ({
+              ...prev,
+              q5_auditor: profile.name || prev.q5_auditor
+            }));
+          }
+        } catch (e) {
+          console.error('Error parsing auditor profile for form:', e);
+        }
+      }
+    }
+  }, [user.uid, editingAudit, isAdmin, userUnit]);
+
+  const filteredUnits = HEALTH_UNITS.filter(u => TRACER_03_UNITS.includes(u.id));
+
+  const handleUnitSelect = (val: string) => {
+    setUnitId(val);
+    const found = HEALTH_UNITS.find(u => u.id === val);
+    setFormData(prev => ({
+      ...prev,
+      q1_hospital: found ? found.name : ''
+    }));
+  };
+
+  const handleFieldChange = (field: keyof typeof formData, value: string) => {
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      
+      // Conditional cleanups matching PDF / User Flow
+      if (field === 'q8_pulseira_branca' && value !== 'Não') next.q9_pulseira_branca_just = '';
+      if (field === 'q10_pulseira_legivel' && value !== 'Não') next.q11_pulseira_legivel_just = '';
+      if (field === 'q12_pulseira_preenchida' && value !== 'Não') next.q13_pulseira_preenchida_just = '';
+      if (field === 'q14_alergia' && value !== 'Sim') {
+        next.q15_alergia_sinalizada = '';
+        next.q16_alergia_just = '';
+      }
+      if (field === 'q15_alergia_sinalizada' && value !== 'Não') next.q16_alergia_just = '';
+      if (field === 'q18_higienizacao_maos' && value !== 'Não') next.q19_higienizacao_maos_just = '';
+      if (field === 'q20_acesso_venoso' && value !== 'Não') next.q21_acesso_venoso_just = '';
+      if (field === 'q22_conferencia_pulseira' && value !== 'Não') next.q23_conferencia_pulseira_just = '';
+      if (field === 'q25_dupla_checagem' && value !== 'Não') next.q26_dupla_checagem_just = '';
+      if (field === 'q27_rotulo_obrigatorios' && value !== 'Não') next.q28_rotulo_obrigatorios_just = '';
+      if (field === 'q29_assinatura_medico' && value !== 'Não') next.q30_assinatura_medico_just = '';
+      if (field === 'q31_assinatura_enfermeiro' && value !== 'Não') next.q32_assinatura_enfermeiro_just = '';
+      if (field === 'q33_hora_correta' && value !== 'Não') next.q34_hora_correta_just = '';
+      if (field === 'q36_diferenciar_semelhantes' && value !== 'Não') next.q37_diferenciar_semelhantes_just = '';
+      if (field === 'q38_registro_alergias' && value !== 'Não') next.q39_registro_alergias_just = '';
+      if (field === 'q41_se_necessario_seguranca' && value !== 'Não') next.q42_se_necessario_seguranca_just = '';
+      if (field === 'q44_velocidade_prescrita' && value !== 'Não') next.q45_velocidade_prescrita_just = '';
+      if (field === 'q46_via_prescrita' && value !== 'Não') next.q47_via_prescrita_just = '';
+      if (field === 'q48_nao_administrada' && value !== 'Não') next.q49_nao_administrada_just = '';
+      if (field === 'q50_dose_checada' && value !== 'Não') next.q51_dose_checada_just = '';
+      if (field === 'q52_mav_acesso_restrito' && value !== 'Não') next.q53_mav_acesso_restrito_just = '';
+      if (field === 'q54_lista_mav_disponivel' && value !== 'Não') next.q55_lista_mav_disponivel_just = '';
+      if (field === 'q56_temperatura_refrigeracao' && value !== 'Não') next.q57_temperatura_refrigeracao_just = '';
+      if (field === 'q58_lista_refrigerados_disponivel' && value !== 'Não') next.q59_lista_refrigerados_disponivel_just = '';
+      if (field === 'q60_medicacao_casa_registrada' && value !== 'Não') next.q61_medicacao_casa_registrada_just = '';
+      if (field === 'q62_amostra_gratis_detectada' && value !== 'Sim') next.q63_amostra_gratis_detectada_just = '';
+
+      return next;
+    });
+  };
+
+  const steps = [
+    { id: 1, title: 'Identificação' },
+    { id: 2, title: 'Pulseiras & Alergias' },
+    { id: 3, title: 'Administração & Linhas' },
+    { id: 4, title: 'Prescrição & Tratamento' },
+    { id: 5, title: 'Estocagem & Setor' }
+  ];
+
+  const validateStep = (step: number): string | null => {
+    if (step === 1) {
+      if (!unitId) return 'Selecione o Hospital/Maternidade.';
+      if (!formData.q2_data) return 'Preencha a data do Tracer.';
+      if (!formData.q3_horario) return 'Preencha o horário de início.';
+      if (!formData.q4_setor.trim()) return 'Informe o setor auditado.';
+      if (!formData.q5_auditor.trim()) return 'Identifique o auditor.';
+      if (!formData.q6_paciente.trim()) return 'Informe o nome do paciente.';
+      if (!formData.q7_prontuario.trim()) return 'Informe o número do prontuário do paciente.';
+    }
+    if (step === 2) {
+      if (!formData.q8_pulseira_branca) return 'Selecione se o paciente possui pulseira branca.';
+      if (formData.q8_pulseira_branca === 'Não' && !formData.q9_pulseira_branca_just.trim()) return 'Justifique a falta de pulseira branca.';
+      if (!formData.q10_pulseira_legivel) return 'Selecione se a pulseira está legível.';
+      if (formData.q10_pulseira_legivel === 'Não' && !formData.q11_pulseira_legivel_just.trim()) return 'Justifique a ilegibilidade da pulseira.';
+      if (!formData.q12_pulseira_preenchida) return 'Selecione se está preenchida adequadamente.';
+      if (formData.q12_pulseira_preenchida === 'Não' && !formData.q13_pulseira_preenchida_just.trim()) return 'Justifique pulseira de identificação preenchida inadequadamente.';
+      if (!formData.q14_alergia) return 'Informe se o paciente tem alergias.';
+      if (formData.q14_alergia === 'Sim') {
+        if (!formData.q15_alergia_sinalizada) return 'Selecione se está sinalizado com pulseira rosa.';
+        if (formData.q15_alergia_sinalizada === 'Não' && !formData.q16_alergia_just.trim()) return 'Justifique alergia não sinalizada com pulseira rosa.';
+      }
+    }
+    if (step === 3) {
+      if (!formData.q17_orientacao_paciente) return 'Preencha se foram fornecidas orientações ao paciente.';
+      if (!formData.q18_higienizacao_maos) return 'Preencha se houve a higienização das mãos.';
+      if (formData.q18_higienizacao_maos === 'Não' && !formData.q19_higienizacao_maos_just.trim()) return 'Justifique a falta de higienização das mãos.';
+      if (!formData.q20_acesso_venoso) return 'Preencha se o acesso venoso foi identificado adequadamente.';
+      if (formData.q20_acesso_venoso === 'Não' && !formData.q21_acesso_venoso_just.trim()) return 'Justifique a falha no acesso venoso.';
+      if (!formData.q22_conferencia_pulseira) return 'Preencha se foi conferida a identificação no momento da administração.';
+      if (formData.q22_conferencia_pulseira === 'Não' && !formData.q23_conferencia_pulseira_just.trim()) return 'Justifique por que não houve conferência com a pulseira.';
+      if (!formData.q24_conferencia_prescricao) return 'Preencha se houve conferência com a prescrição.';
+      if (!formData.q25_dupla_checagem) return 'Preencha se foi realizada a dupla checagem da MAV.';
+      if (formData.q25_dupla_checagem === 'Não' && !formData.q26_dupla_checagem_just.trim()) return 'Justifique a falta de dupla checagem.';
+      if (!formData.q27_rotulo_obrigatorios) return 'Preencha sobre os identificadores obrigatórios no rótulo.';
+      if (formData.q27_rotulo_obrigatorios === 'Não' && !formData.q28_rotulo_obrigatorios_just.trim()) return 'Justifique por que faltam rótulos ideais.';
+    }
+    if (step === 4) {
+      if (!formData.q29_assinatura_medico) return 'Preencha sobre a assinatura do Médico.';
+      if (formData.q29_assinatura_medico === 'Não' && !formData.q30_assinatura_medico_just.trim()) return 'Justifique ausência de assinatura do médico.';
+      if (!formData.q31_assinatura_enfermeiro) return 'Preencha sobre a assinatura do Enfermeiro que abriu os horários.';
+      if (formData.q31_assinatura_enfermeiro === 'Não' && !formData.q32_assinatura_enfermeiro_just.trim()) return 'Justifique ausência de assinatura do enfermeiro.';
+      if (!formData.q33_hora_correta) return 'Preencha se a hora de administração confere com o prescrito.';
+      if (formData.q33_hora_correta === 'Não' && !formData.q34_hora_correta_just.trim()) return 'Justifique divergência de horário.';
+      if (!formData.q35_sem_abreviaturas) return 'Preencha se as prescrições estão sem abreviações.';
+      if (!formData.q36_diferenciar_semelhantes) return 'Preencha se há estratégia para diferenciar nomes de medicamentos semelhantes.';
+      if (formData.q36_diferenciar_semelhantes === 'Não' && !formData.q37_diferenciar_semelhantes_just.trim()) return 'Justifique a falta de estratégia de medicamentos semelhantes.';
+      if (!formData.q38_registro_alergias) return 'Preencha se há registro das alergias na prescrição.';
+      if (formData.q38_registro_alergias === 'Não' && !formData.q39_registro_alergias_just.trim()) return 'Justifique falta de alergia registrada na prescrição.';
+      if (!formData.q40_duracao_especificada) return 'Preencha se a duração do tratamento está especificada.';
+      if (!formData.q41_se_necessario_seguranca) return 'Preencha se medicação ACM/se necessário contêm dados de segurança.';
+      if (formData.q41_se_necessario_seguranca === 'Não' && !formData.q42_se_necessario_seguranca_just.trim()) return 'Justifique falta de segurança para medicamentos "se necessário".';
+      if (!formData.q43_diluente_prescrito) return 'Preencha se o diluente está prescrito.';
+      if (!formData.q44_velocidade_prescrita) return 'Preencha se a velocidade de infusão está descrita.';
+      if (formData.q44_velocidade_prescrita === 'Não' && !formData.q45_velocidade_prescrita_just.trim()) return 'Justifique ausência de velocidade transcrita.';
+      if (!formData.q46_via_prescrita) return 'Preencha se a via administrativa está prescrita.';
+      if (formData.q46_via_prescrita === 'Não' && !formData.q47_via_prescrita_just.trim()) return 'Justifique ausência de via descrita.';
+    }
+    if (step === 5) {
+      if (!formData.q48_nao_administrada) return 'Preencha se alguma medicação do horário não foi administrada.';
+      if (formData.q48_nao_administrada === 'Não' && !formData.q49_nao_administrada_just.trim()) return 'Justifique medicação não administrada.';
+      if (!formData.q50_dose_checada) return 'Preencha se a dose administrada foi checada de forma legível.';
+      if (formData.q50_dose_checada === 'Não' && !formData.q51_dose_checada_just.trim()) return 'Justifique a falta de checagem.';
+      if (!formData.q52_mav_acesso_restrito) return 'Preencha se medicamentos MAV estão em acesso restrito.';
+      if (formData.q52_mav_acesso_restrito === 'Não' && !formData.q53_mav_acesso_restrito_just.trim()) return 'Justifique e descreva estocagem insegura.';
+      if (!formData.q54_lista_mav_disponivel) return 'Preencha se o setor dispõe de lista de MAV facilitadora.';
+      if (formData.q54_lista_mav_disponivel === 'Não' && !formData.q55_lista_mav_disponivel_just.trim()) return 'Justifique a falta da lista de MAV.';
+      if (!formData.q56_temperatura_refrigeracao) return 'Preencha sobre a conservação térmica da geladeira (2 a 8ºC).';
+      if (formData.q56_temperatura_refrigeracao === 'Não' && !formData.q57_temperatura_refrigeracao_just.trim()) return 'Justifique a temperatura fora do padrão de refrigeração.';
+      if (!formData.q58_lista_refrigerados_disponivel) return 'Preencha se há lista visível de medicamentos refrigerados.';
+      if (formData.q58_lista_refrigerados_disponivel === 'Não' && !formData.q59_lista_refrigerados_disponivel_just.trim()) return 'Justifique a ausência da lista refrigerada.';
+      if (!formData.q60_medicacao_casa_registrada) return 'Preencha se há e se está registrada a medicação vinda do domicílio.';
+      if (formData.q60_medicacao_casa_registrada === 'Não' && !formData.q61_medicacao_casa_registrada_just.trim()) return 'Justifique medicamento de casa de paciente sem prontuário.';
+      if (!formData.q62_amostra_gratis_detectada) return 'Preencha sobre a existência de amostras grátis no posto.';
+      if (formData.q62_amostra_gratis_detectada === 'Sim' && !formData.q63_amostra_gratis_detectada_just.trim()) return 'Justifique por que existem amostras grátis no setor.';
+    }
+    return null;
+  };
+
+  const handleNext = () => {
+    const validationError = validateStep(currentStep);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError('');
+    setCurrentStep(prev => prev + 1);
+  };
+
+  const handleBack = () => {
+    setError('');
+    setCurrentStep(prev => prev - 1);
+  };
+
+  const handleSubmit = async (e: any) => {
+    e.preventDefault();
+    const validationError = validateStep(5);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+
+    try {
+      if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
+        throw new Error('quota-exceeded');
+      }
+
+      // Format unit and construct final rawData dictionary matching utility arrays
+      const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
+      const rawData: Record<string, string> = {
+        '02- Nome do Hospital/Maternidade:': unitName,
+        '03- Data do Tracer:': formData.q2_data,
+        '04- Horário do Início do Tracer:': formData.q3_horario,
+        '05- Setor Auditado:': formData.q4_setor,
+        '06- Nome Completo do Auditor:': formData.q5_auditor,
+        '07- Nome Completo do Paciente:': formData.q6_paciente,
+        '08- Nº do Prontuário do Paciente:': formData.q7_prontuario,
+
+        '09- Paciente identificado com pulseira branca?': formData.q8_pulseira_branca,
+        ...(formData.q8_pulseira_branca === 'Não' && { '10- Se não, justifique:': formData.q9_pulseira_branca_just }),
+        '11- A pulseira de identificação está legível?': formData.q10_pulseira_legivel,
+        ...(formData.q10_pulseira_legivel === 'Não' && { '12- Se não, justifique:': formData.q11_pulseira_legivel_just }),
+        '13- A pulseira de identificação preenchida adequadamente?': formData.q12_pulseira_preenchida,
+        ...(formData.q12_pulseira_preenchida === 'Não' && { '14- Se não, justifique:': formData.q13_pulseira_preenchida_just }),
+        '15- O paciente tem alergia alimentar/medicamentosa?': formData.q14_alergia,
+        ...(formData.q14_alergia === 'Sim' && { '16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q15_alergia_sinalizada }),
+        ...(formData.q15_alergia_sinalizada === 'Não' && { '17- Se não, justifique:': formData.q16_alergia_just }),
+
+        '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?': formData.q17_orientacao_paciente,
+        '19- Houve higienização das mãos imediatamente antes da administração da medicação?': formData.q18_higienizacao_maos,
+        ...(formData.q18_higienizacao_maos === 'Não' && { '20- Se não, justifique:': formData.q19_higienizacao_maos_just }),
+        '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q20_acesso_venoso,
+        ...(formData.q20_acesso_venoso === 'Não' && { '22- Se não, justifique:': formData.q21_acesso_venoso_just }),
+        '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?': formData.q22_conferencia_pulseira,
+        ...(formData.q22_conferencia_pulseira === 'Não' && { '24- Se não, justifique:': formData.q23_conferencia_pulseira_just }),
+        '25- Houve conferência do medicamento administrado com a prescrição?': formData.q24_conferencia_prescricao,
+        '26- Realizada dupla checagem no momento de administração da MAV?': formData.q25_dupla_checagem,
+        ...(formData.q25_dupla_checagem === 'Não' && { '27- Se não, justifique:': formData.q26_dupla_checagem_just }),
+        '28- O rótulo de medicação está com todos os identificadores obrigatórios?': formData.q27_rotulo_obrigatorios,
+        ...(formData.q27_rotulo_obrigatorios === 'Não' && { '29- Se não, justifique:': formData.q28_rotulo_obrigatorios_just }),
+
+        '30- Prescrição com assinatura do médico?': formData.q29_assinatura_medico,
+        ...(formData.q29_assinatura_medico === 'Não' && { '31- Se não, justifique:': formData.q30_assinatura_medico_just }),
+        '32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?': formData.q31_assinatura_enfermeiro,
+        ...(formData.q31_assinatura_enfermeiro === 'Não' && { '33- Se não, justifique:': formData.q32_assinatura_enfermeiro_just }),
+        '34- A hora da administração da medicação é a mesma da prescrição?': formData.q33_hora_correta,
+        ...(formData.q33_hora_correta === 'Não' && { '35- Se não, justifique:': formData.q34_hora_correta_just }),
+        '36- A prescrição está SEM USO DE ABREVIATURAS?': formData.q35_sem_abreviaturas,
+        '37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)': formData.q36_diferenciar_semelhantes,
+        ...(formData.q36_diferenciar_semelhantes === 'Não' && { '38- Se não, justifique:': formData.q37_diferenciar_semelhantes_just }),
+        '39- Há registros das alergias medicamentosas na prescrição?': formData.q38_registro_alergias,
+        ...(formData.q38_registro_alergias === 'Não' && { '40- Se não, justifique:': formData.q39_registro_alergias_just }),
+        '41- A duração do tratamento está especificada?': formData.q40_duracao_especificada,
+        '42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?': formData.q41_se_necessario_seguranca,
+        ...(formData.q41_se_necessario_seguranca === 'Não' && { '43- Se não, justifique:': formData.q42_se_necessario_seguranca_just }),
+        '44- O diluente da medicação está prescrito?': formData.q43_diluente_prescrito,
+        '45- A velocidade de infusão está prescrita?': formData.q44_velocidade_prescrita,
+        ...(formData.q44_velocidade_prescrita === 'Não' && { '46- Se não, justifique:': formData.q45_velocidade_prescrita_just }),
+        '47- A via de administração está prescrita?': formData.q46_via_prescrita,
+        ...(formData.q46_via_prescrita === 'Não' && { '48- Se não, justifique:': formData.q47_via_prescrita_just }),
+
+        '49- Alguma medicação não administrada conforme prescrição?': formData.q48_nao_administrada,
+        ...(formData.q48_nao_administrada === 'Não' && { '50- Se não, justifique:': formData.q49_nao_administrada_just }),
+        '51- A dose administrada foi checada de forma legível após a administração da medicação?': formData.q50_dose_checada,
+        ...(formData.q50_dose_checada === 'Não' && { '52- Se não, justifique:': formData.q51_dose_checada_just }),
+        '53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?': formData.q52_mav_acesso_restrito,
+        ...(formData.q52_mav_acesso_restrito === 'Não' && { '54- Se não, justifique:': formData.q53_mav_acesso_restrito_just }),
+        '55- Lista de medicações de alta vigilância (MAV) disponível no setor?': formData.q54_lista_mav_disponivel,
+        ...(formData.q54_lista_mav_disponivel === 'Não' && { '56- Se não, justifique:': formData.q55_lista_mav_disponivel_just }),
+        '57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?': formData.q56_temperatura_refrigeracao,
+        ...(formData.q56_temperatura_refrigeracao === 'Não' && { '58- Se não, justifique:': formData.q57_temperatura_refrigeracao_just }),
+        '59- Lista de medicações refrigeradas disponível no setor?': formData.q58_lista_refrigerados_disponivel,
+        ...(formData.q58_lista_refrigerados_disponivel === 'Não' && { '60- Se não, justifique:': formData.q59_lista_refrigerados_disponivel_just }),
+        '61- Medicação trazida de casa registrada na prescrição do paciente?': formData.q60_medicacao_casa_registrada,
+        ...(formData.q60_medicacao_casa_registrada === 'Não' && { '62- Se não, justifique:': formData.q61_medicacao_casa_registrada_just }),
+        '63- Alguma amostra grátis detectada no setor?': formData.q62_amostra_gratis_detectada,
+        ...(formData.q62_amostra_gratis_detectada === 'Sim' && { '64- Se sim, justifique:': formData.q63_amostra_gratis_detectada_just }),
+      };
+
+      // Compliance is strictly tied to Hand Hygiene check (Yes)
+      const compliantBool = formData.q18_higienizacao_maos === 'Sim';
+
+      const dbPayload = {
+        unitId,
+        auditorId: user.uid,
+        compliant: compliantBool,
+        rawData,
+        sourceRowHash: JSON.stringify(rawData),
+        tracerNumber: '03',
+        tracerName: 'Processos Seguros de Medicação',
+        timestamp: serverTimestamp(),
+      };
+
+      let activeDocId = '';
+      if (editingAudit && editingAudit.id && !editingAudit.id.startsWith('local_')) {
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(doc(db, 'audits_hand_hygiene', editingAudit.id), {
+          ...dbPayload,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+        activeDocId = editingAudit.id;
+      } else {
+        const docRef = await addDoc(collection(db, 'audits_hand_hygiene'), dbPayload);
+        activeDocId = docRef.id;
+      }
+
+      try {
+        const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
+        saveCustomLocalAudit({
+          id: activeDocId,
+          unitId,
+          auditorId: user.uid,
+          compliant: compliantBool,
+          rawData,
+          sourceRowHash: JSON.stringify(rawData),
+          tracerNumber: '03',
+          tracerName: 'Processos Seguros de Medicação',
+          type: 'T03',
+          competencia: editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(new Date())}/${new Date().getFullYear()}`,
+          timestampStr: editingAudit?.timestampStr || new Date().toISOString()
+        });
+      } catch (saveLocalErr) {
+        console.error("Local shadow save failed", saveLocalErr);
+      }
+      onComplete();
+    } catch (err: any) {
+      if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit') || err.message === 'quota-exceeded')) {
+        localStorage.setItem('firestore_quota_exceeded', 'true');
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
+        
+        try {
+          const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
+          const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
+          const rawData: Record<string, string> = {
+            '02- Nome do Hospital/Maternidade:': unitName,
+            '03- Data do Tracer:': formData.q2_data,
+            '04- Horário do Início do Tracer:': formData.q3_horario,
+            '05- Setor Auditado:': formData.q4_setor,
+            '06- Nome Completo do Auditor:': formData.q5_auditor,
+            '07- Nome Completo do Paciente:': formData.q6_paciente,
+            '08- Nº do Prontuário do Paciente:': formData.q7_prontuario,
+            '09- Paciente identificado com pulseira branca?': formData.q8_pulseira_branca,
+            '11- A pulseira de identificação está legível?': formData.q10_pulseira_legivel,
+            '13- A pulseira de identificação preenchida adequadamente?': formData.q12_pulseira_preenchida,
+            '15- O paciente tem alergia alimentar/medicamentosa?': formData.q14_alergia,
+            '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?': formData.q17_orientacao_paciente,
+            '19- Houve higienização das mãos imediatamente antes da administração da medicação?': formData.q18_higienizacao_maos,
+            '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q20_acesso_venoso,
+            '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?': formData.q22_conferencia_pulseira,
+            '25- Houve conferência do medicamento administrado com a prescrição?': formData.q24_conferencia_prescricao,
+            '26- Realizada dupla checagem no momento de administração da MAV?': formData.q25_dupla_checagem,
+            '28- O rótulo de medicação está com todos os identificadores obrigatórios?': formData.q27_rotulo_obrigatorios,
+          };
+          const compliantBool = formData.q18_higienizacao_maos === 'Sim';
+
+          saveCustomLocalAudit({
+            id: editingAudit?.id || ('local_h_' + Date.now()),
+            unitId,
+            auditorId: user.uid,
+            compliant: compliantBool,
+            rawData,
+            sourceRowHash: JSON.stringify(rawData),
+            tracerNumber: '03',
+            tracerName: 'Processos Seguros de Medicação',
+            type: 'T03',
+            competencia: editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(new Date())}/${new Date().getFullYear()}`,
+            timestampStr: editingAudit?.timestampStr || new Date().toISOString()
+          });
+          onComplete();
+        } catch (saveErr) {
+          console.error("Local save failed", saveErr);
+          setError('Erro ao salvar auditoria localmente');
+        }
+      } else {
+        setError('Erro ao salvar auditoria: ' + err.message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const renderTripleToggle = (field: keyof typeof formData, label: string, conditionalFieldName?: keyof typeof formData, conditionalLabel?: string) => {
+    const value = formData[field];
+    return (
+      <div className="space-y-3 p-4 bg-slate-50/50 rounded-xl border border-slate-100 transition-all hover:bg-slate-50">
+        <label className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">{label}</label>
+        <div className="flex gap-2">
+          {['Sim', 'Não', 'Não se aplica'].map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => handleFieldChange(field, option)}
+              className={`flex-1 py-2 px-3 text-[10px] font-bold uppercase rounded-lg border transition-all ${
+                value === option
+                  ? option === 'Sim'
+                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-md shadow-emerald-50'
+                    : option === 'Não'
+                    ? 'bg-red-600 border-red-600 text-white shadow-md shadow-red-50'
+                    : 'bg-slate-600 border-slate-600 text-white shadow-md shadow-slate-50'
+                  : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+
+        {conditionalFieldName && value === 'Não' && (
+          <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="space-y-1.5 mt-3">
+            <span className="text-[9px] font-extrabold uppercase text-amber-600 tracking-widest block">
+              {conditionalLabel || 'Se não, justifique:'}
+            </span>
+            <input
+              type="text"
+              value={formData[conditionalFieldName] as string}
+              onChange={(e) => handleFieldChange(conditionalFieldName, e.target.value)}
+              placeholder="Digite a justificativa detalhada..."
+              className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            />
+          </motion.div>
+        )}
+
+        {conditionalFieldName && field === 'q14_alergia' && value === 'Sim' && (
+          <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 mt-3 pt-3 border-t border-slate-100">
+            {renderTripleToggle('q15_alergia_sinalizada', '16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?', 'q16_alergia_just', '17- Se não, justifique:')}
+          </motion.div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto pb-12">
+      <header className="mb-8 p-6 bg-white border-l-4 border-indigo-600 shadow-sm rounded-r-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2 uppercase">
+            <Pill className="w-5 h-5 text-indigo-600" />
+            Tracer 03 • Coleta Digital Medicação
+          </h1>
+          <p className="text-slate-500 text-[10px] uppercase font-bold tracking-wider leading-relaxed">
+            Processos Seguros de Medicação: Fortalecendo a Qualidade e Segurança do Paciente
+          </p>
+        </div>
+        <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-100/50 px-3 py-1 text-[9px] text-indigo-700 font-extrabold uppercase tracking-widest rounded-full shrink-0 h-fit self-start">
+          <Sparkles className="w-3.5 h-3.5" />
+          Passo {currentStep} de 5
+        </div>
+      </header>
+
+      {/* Progress bar */}
+      <div className="h-1 w-full bg-slate-100 rounded-full mb-8 overflow-hidden">
+        <div 
+          className="h-full bg-gradient-to-r from-indigo-500 to-blue-600 transition-all duration-300"
+          style={{ width: `${(currentStep / 5) * 100}%` }}
+        />
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* Navigation Sidebar Drawer */}
+        <div className="w-full md:w-56 shrink-0 space-y-1">
+          {steps.map((s) => (
+            <button
+              key={s.id}
+              disabled={submitting}
+              onClick={() => {
+                if (s.id < currentStep) setCurrentStep(s.id);
+                else if (s.id > currentStep) {
+                  let canGo = true;
+                  for (let check = currentStep; check < s.id; check++) {
+                    if (validateStep(check)) {
+                      setError(validateStep(check));
+                      canGo = false;
+                      break;
+                    }
+                  }
+                  if (canGo) {
+                    setError('');
+                    setCurrentStep(s.id);
+                  }
+                }
+              }}
+              className={`w-full flex items-center justify-between p-3 rounded-xl border text-[9px] font-black uppercase tracking-widest transition-all ${
+                s.id === currentStep
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100'
+                  : s.id < currentStep
+                  ? 'bg-white border-emerald-100 text-emerald-600 hover:bg-emerald-50/50'
+                  : 'bg-white border-slate-100 text-slate-400 opacity-60'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[8px] ${
+                  s.id === currentStep 
+                    ? 'bg-white text-indigo-600' 
+                    : s.id < currentStep 
+                    ? 'bg-emerald-600 text-white' 
+                    : 'bg-slate-100 text-slate-400'
+                }`}>
+                  {s.id < currentStep ? '✓' : s.id}
+                </span>
+                {s.title}
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 opacity-50" />
+            </button>
+          ))}
+        </div>
+
+        {/* Form panel */}
+        <form onSubmit={handleSubmit} className="flex-1 theme-card border-none ring-1 ring-slate-200 p-6 sm:p-8 space-y-6">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentStep}
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.15 }}
+              className="space-y-6"
+            >
+              {/* STEP 1: IDENTIFICATION */}
+              {currentStep === 1 && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                      <ClipboardCheck className="w-4 h-4 text-indigo-500" />
+                      Section 01 - Identificação da Coleta
+                    </h2>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">
+                      02- Nome do Hospital/Maternidade: * {!isAdmin && userUnit && <span className="text-blue-600 font-black">(Vinculado ao seu perfil)</span>}
+                    </label>
+                    <select 
+                      value={unitId} 
+                      onChange={(e) => handleUnitSelect(e.target.value)}
+                      disabled={!isAdmin && !!userUnit}
+                      className={`w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none transition-all ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500 focus:bg-white'}`}
+                    >
+                      <option value="">Selecione uma unidade...</option>
+                      {filteredUnits.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">03- Data do Tracer: *</label>
+                      <input 
+                        type="date"
+                        value={formData.q2_data}
+                        onChange={(e) => handleFieldChange('q2_data', e.target.value)}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">04- Horário do Início: *</label>
+                      <input 
+                        type="time"
+                        value={formData.q3_horario}
+                        onChange={(e) => handleFieldChange('q3_horario', e.target.value)}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">05- Setor Auditado: *</label>
+                    <input 
+                      type="text"
+                      value={formData.q4_setor}
+                      onChange={(e) => handleFieldChange('q4_setor', e.target.value)}
+                      placeholder="Ex: Enfermaria Pediatria, UTI Geral..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">06- Nome Completo do Auditor: *</label>
+                    <input 
+                      type="text"
+                      value={formData.q5_auditor}
+                      onChange={(e) => handleFieldChange('q5_auditor', e.target.value)}
+                      placeholder="Nome do Auditor..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">07- Nome Completo do Paciente: *</label>
+                    <input 
+                      type="text"
+                      value={formData.q6_paciente}
+                      onChange={(e) => handleFieldChange('q6_paciente', e.target.value)}
+                      placeholder="Nome do paciente..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">08- Nº do Prontuário do Paciente: *</label>
+                    <input 
+                      type="text"
+                      value={formData.q7_prontuario}
+                      onChange={(e) => handleFieldChange('q7_prontuario', e.target.value)}
+                      placeholder="Ex: 12345/2026..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: PULSEIRAS & ALERGIAS */}
+              {currentStep === 2 && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      Section 02 - Identificação do Paciente e Alergias
+                    </h2>
+                  </div>
+
+                  {renderTripleToggle('q8_pulseira_branca', '09- Paciente identificado com pulseira branca?', 'q9_pulseira_branca_just', '10- Se não, justifique:')}
+                  
+                  {renderTripleToggle('q10_pulseira_legivel', '11- A pulseira de identificação está legível?', 'q11_pulseira_legivel_just', '12- Se não, justifique:')}
+
+                  {renderTripleToggle('q12_pulseira_preenchida', '13- A pulseira de identificação preenchida adequadamente?', 'q13_pulseira_preenchida_just', '14- Se não, justifique:')}
+
+                  {renderTripleToggle('q14_alergia', '15- O paciente tem alergia alimentar/medicamentosa?', 'q16_alergia_just', '17- Se não, justifique:')}
+                </div>
+              )}
+
+              {/* STEP 3: PREPARO, ADMINISTRAÇÃO E LINHAS */}
+              {currentStep === 3 && (
+                <div className="space-y-5">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      Section 03 - Segurança no Preparo e Administração
+                    </h2>
+                  </div>
+
+                  {renderTripleToggle('q17_orientacao_paciente', '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?')}
+
+                  {renderTripleToggle('q18_higienizacao_maos', '19- Houve higienização das mãos imediatamente antes da administração da medicação?', 'q19_higienizacao_maos_just', '20- Se não, justifique:')}
+
+                  {renderTripleToggle('q20_acesso_venoso', '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?', 'q21_acesso_venoso_just', '22- Se não, justifique:')}
+
+                  {renderTripleToggle('q22_conferencia_pulseira', '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?', 'q23_conferencia_pulseira_just', '24- Se não, justifique:')}
+
+                  {renderTripleToggle('q24_conferencia_prescricao', '25- Houve conferência do medicamento administrado com a prescrição?')}
+
+                  {renderTripleToggle('q25_dupla_checagem', '26- Realizada dupla checagem no momento de administração da MAV?', 'q26_dupla_checagem_just', '27- Se não, justifique:')}
+
+                  {renderTripleToggle('q27_rotulo_obrigatorios', '28- O rótulo de medicação está com todos os identificadores obrigatórios?', 'q28_rotulo_obrigatorios_just', '29- Se não, justifique:')}
+                </div>
+              )}
+
+              {/* STEP 4: PRESCRIÇÃO E TRATAMENTO */}
+              {currentStep === 4 && (
+                <div className="space-y-5 max-h-[500px] overflow-y-auto pr-2">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      Section 04 - Prescrição e Tratamento Seguro
+                    </h2>
+                  </div>
+
+                  {renderTripleToggle('q29_assinatura_medico', '30- Prescrição com assinatura do médico?', 'q30_assinatura_medico_just', '31- Se não, justifique:')}
+
+                  {renderTripleToggle('q31_assinatura_enfermeiro', '32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?', 'q32_assinatura_enfermeiro_just', '33- Se não, justifique:')}
+
+                  {renderTripleToggle('q33_hora_correta', '34- A hora da administração da medicação é a mesma da prescrição?', 'q34_hora_correta_just', '35- Se não, justifique:')}
+
+                  {renderTripleToggle('q35_sem_abreviaturas', '36- A prescrição está SEM USO DE ABREVIATURAS?')}
+
+                  {renderTripleToggle('q36_diferenciar_semelhantes', '37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)', 'q37_diferenciar_semelhantes_just', '38- Se não, justifique:')}
+
+                  {renderTripleToggle('q38_registro_alergias', '39- Há registros das alergias medicamentosas na prescrição?', 'q39_registro_alergias_just', '40- Se não, justifique:')}
+
+                  {renderTripleToggle('q40_duracao_especificada', '41- A duração do tratamento está especificada?')}
+
+                  {renderTripleToggle('q41_se_necessario_seguranca', '42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?', 'q42_se_necessario_seguranca_just', '43- Se não, justifique:')}
+
+                  {renderTripleToggle('q43_diluente_prescrito', '44- O diluente da medicação está prescrito?')}
+
+                  {renderTripleToggle('q44_velocidade_prescrita', '45- A velocidade de infusão está prescrita?', 'q45_velocidade_prescrita_just', '46- Se não, justifique:')}
+
+                  {renderTripleToggle('q46_via_prescrita', '47- A via de administração está prescrita?', 'q47_via_prescrita_just', '48- Se não, justifique:')}
+                </div>
+              )}
+
+              {/* STEP 5: ESTOCAGEM E AMBIENTE */}
+              {currentStep === 5 && (
+                <div className="space-y-5 max-h-[500px] overflow-y-auto pr-2">
+                  <div className="border-b border-slate-100 pb-3">
+                    <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
+                      Section 05 - Administração Avançada, Armazenamento e Setor
+                    </h2>
+                  </div>
+
+                  {renderTripleToggle('q48_nao_administrada', '49- Alguma medicação não administrada conforme prescrição?', 'q49_nao_administrada_just', '50- Se não, justifique:')}
+
+                  {renderTripleToggle('q50_dose_checada', '51- A dose administrada foi checada de forma legível após a administração da medicação?', 'q51_dose_checada_just', '52- Se não, justifique:')}
+
+                  {renderTripleToggle('q52_mav_acesso_restrito', '53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?', 'q53_mav_acesso_restrito_just', '54- Se não, justifique:')}
+
+                  {renderTripleToggle('q54_lista_mav_disponivel', '55- Lista de medicações de alta vigilância (MAV) disponível no setor?', 'q55_lista_mav_disponivel_just', '56- Se não, justifique:')}
+
+                  {renderTripleToggle('q56_temperatura_refrigeracao', '57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?', 'q57_temperatura_refrigeracao_just', '58- Se não, justifique:')}
+
+                  {renderTripleToggle('q58_lista_refrigerados_disponivel', '59- Lista de medicações refrigeradas disponível no setor?', 'q59_lista_refrigerados_disponivel_just', '60- Se não, justifique:')}
+
+                  {renderTripleToggle('q60_medicacao_casa_registrada', '61- Medicação trazida de casa registrada na prescrição do paciente?', 'q61_medicacao_casa_registrada_just', '62- Se não, justifique:')}
+
+                  {renderTripleToggle('q62_amostra_gratis_detectada', '63- Alguma amostra grátis detectada no setor?', 'q63_amostra_gratis_detectada_just', '64- Se sim, justifique:')}
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Validation & Submit Warnings */}
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-bold uppercase tracking-wide">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <span>{error}</span>
+            </motion.div>
+          )}
+
+          {/* Nav Controls */}
+          <div className="flex gap-4 pt-4 border-t border-slate-100 shrink-0">
+            {currentStep > 1 && (
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleBack}
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition-all cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Voltar
+              </button>
+            )}
+
+            {currentStep < 5 ? (
+              <button
+                type="button"
+                onClick={handleNext}
+                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-slate-950 text-white hover:bg-slate-800 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-slate-100 cursor-pointer"
+              >
+                Avançar
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={submitting}
+                className={`flex-1 flex items-center justify-center gap-2 py-3.5 px-4 font-black text-xs uppercase tracking-widest rounded-xl transition-all ${
+                  submitting
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-150 cursor-pointer'
+                }`}
+              >
+                {submitting ? (
+                  'Salvando...'
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    Enviar Coleta do Tracer
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
