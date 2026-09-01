@@ -377,6 +377,9 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
     try {
       const activeDocId = editingAudit?.id || ('aud_p_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
 
+      const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
+      const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
+
       // 1. Immediately persist locally (instantaneous - zero lag)
       try {
         const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
@@ -391,42 +394,42 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
           rawData,
           sourceRowHash: JSON.stringify(rawData),
           timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-          competencia: editingAudit?.competencia || 'mai./2026'
+          competencia: dynamicCompetencia
         });
       } catch (saveLocalErr) {
         console.error("Local shadow save failed", saveLocalErr);
       }
 
-      // 2. Synchronize to Firestore in non-blocking / fast-timeout manner
-      const syncToFirestore = async () => {
-        if (localStorage.getItem('firestore_quota_exceeded') === 'true') return;
-        try {
+      // 2. Synchronize to Firestore with real network sync
+      try {
+        if (localStorage.getItem('firestore_quota_exceeded') !== 'true') {
           const { doc, setDoc } = await import('firebase/firestore');
-          await setDoc(doc(db, 'audits_patient_id', activeDocId), {
-            unitId,
-            auditorId: user.uid,
-            ...scorePayload,
-            rawData,
-            sourceRowHash: JSON.stringify(rawData),
-            tracerNumber: '01',
-            tracerName: 'Beira Leito',
-            timestamp: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        } catch (err: any) {
-          console.warn('[PatientIdForm] Firestore save notice:', err?.message || err);
-          if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted'))) {
+          await Promise.race([
+            setDoc(doc(db, 'audits_patient_id', activeDocId), {
+              unitId,
+              auditorId: user.uid,
+              ...scorePayload,
+              rawData,
+              sourceRowHash: JSON.stringify(rawData),
+              tracerNumber: '01',
+              tracerName: 'Beira Leito',
+              timestamp: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+          ]);
+        }
+      } catch (syncErr: any) {
+        if (syncErr?.message === 'timeout') {
+          console.warn('[PatientIdForm] Firestore sync timed out (persisted locally).');
+        } else {
+          console.warn('[PatientIdForm] Firestore save notice:', syncErr?.message || syncErr);
+          if (syncErr?.message && (syncErr.message.includes('Quota') || syncErr.message.includes('resource-exhausted'))) {
             localStorage.setItem('firestore_quota_exceeded', 'true');
             window.dispatchEvent(new Event('firestore-quota-exceeded'));
           }
         }
-      };
-
-      // Ensure user doesn't wait more than 600ms even on slow network
-      await Promise.race([
-        syncToFirestore(),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      }
 
       onComplete();
     } catch (err: any) {

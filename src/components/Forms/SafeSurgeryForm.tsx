@@ -390,6 +390,9 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
 
       const activeDocId = editingAudit?.id || ('aud_s_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
 
+      const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
+      const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
+
       // 1. Immediately persist locally
       try {
         const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
@@ -404,41 +407,42 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
           rawData,
           sourceRowHash: JSON.stringify(rawData),
           timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-          competencia: editingAudit?.competencia || 'mai./2026'
+          competencia: dynamicCompetencia
         });
       } catch (saveLocalErr) {
         console.error("Local shadow save failed", saveLocalErr);
       }
 
-      // 2. Synchronize to Firestore with quick race timeout
-      const syncToFirestore = async () => {
-        if (localStorage.getItem('firestore_quota_exceeded') === 'true') return;
-        try {
+      // 2. Synchronize to Firestore with real network sync
+      try {
+        if (localStorage.getItem('firestore_quota_exceeded') !== 'true') {
           const { doc, setDoc } = await import('firebase/firestore');
-          await setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
-            unitId,
-            auditorId: user.uid,
-            ...scorePayload,
-            rawData,
-            sourceRowHash: JSON.stringify(rawData),
-            tracerNumber: '02',
-            tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
-            timestamp: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        } catch (err: any) {
-          console.warn('[SafeSurgeryForm] Firestore save notice:', err?.message || err);
-          if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted'))) {
+          await Promise.race([
+            setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
+              unitId,
+              auditorId: user.uid,
+              ...scorePayload,
+              rawData,
+              sourceRowHash: JSON.stringify(rawData),
+              tracerNumber: '02',
+              tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
+              timestamp: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+          ]);
+        }
+      } catch (syncErr: any) {
+        if (syncErr?.message === 'timeout') {
+          console.warn('[SafeSurgeryForm] Firestore sync timed out (persisted locally).');
+        } else {
+          console.warn('[SafeSurgeryForm] Firestore save notice:', syncErr?.message || syncErr);
+          if (syncErr?.message && (syncErr.message.includes('Quota') || syncErr.message.includes('resource-exhausted'))) {
             localStorage.setItem('firestore_quota_exceeded', 'true');
             window.dispatchEvent(new Event('firestore-quota-exceeded'));
           }
         }
-      };
-
-      await Promise.race([
-        syncToFirestore(),
-        new Promise(resolve => setTimeout(resolve, 600))
-      ]);
+      }
 
       onComplete();
     } catch (err: any) {

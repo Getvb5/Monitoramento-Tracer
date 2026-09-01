@@ -217,6 +217,7 @@ export function saveCustomLocalAudit(audit: any) {
       current.push(withStr);
     }
     safeSaveCustomLocalAudits(current);
+    window.dispatchEvent(new Event('local-data-updated'));
   } catch (e) {
     console.error('Error saving custom local audit:', e);
   }
@@ -247,6 +248,7 @@ export function saveCustomLocalAuditsBulk(audits: any[]) {
 
     const updated = Array.from(map.values());
     safeSaveCustomLocalAudits(updated);
+    window.dispatchEvent(new Event('local-data-updated'));
   } catch (e) {
     console.error('Error saving bulk custom local audits:', e);
   }
@@ -346,6 +348,7 @@ export function replaceSyncedLocalAudits(type: string, tracerId: string, newAudi
 
     const updated = [...preserved, ...formattedNew];
     safeSaveCustomLocalAudits(updated);
+    window.dispatchEvent(new Event('local-data-updated'));
   } catch (e) {
     console.error('Error replacing synced local audits:', e);
   }
