@@ -976,7 +976,7 @@ export default function Dashboard({
     const effectiveUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     const unitsToTrack = effectiveUnit
       ? HEALTH_UNITS.filter(u => u.id === effectiveUnit)
-      : HEALTH_UNITS;
+      : (isAdmin ? HEALTH_UNITS : []);
 
     return unitsToTrack.map(unit => {
       const filterByUnit = (audits: any[]) => audits.filter(a => 

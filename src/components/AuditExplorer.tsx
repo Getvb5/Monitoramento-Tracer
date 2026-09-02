@@ -608,6 +608,7 @@ export default function AuditExplorer({
                     <AuditRow 
                       key={audit.id} 
                       audit={audit} 
+                      isAdmin={isAdmin}
                       setViewMode={setViewMode} 
                       onEdit={setEditingAudit}
                       onDelete={setDeletingAudit}
@@ -844,11 +845,12 @@ const IntegralTable: React.FC<{ audits: any[]; onView: (audit: any) => void }> =
 
 const AuditRow: React.FC<{ 
   audit: any; 
+  isAdmin?: boolean;
   setViewMode: (mode: 'compact' | 'integral') => void;
   onEdit: (audit: any) => void;
   onDelete: (audit: any) => void;
   onView: (audit: any) => void;
-}> = ({ audit, setViewMode, onEdit, onDelete, onView }) => {
+}> = ({ audit, isAdmin = true, setViewMode, onEdit, onDelete, onView }) => {
   const [expanded, setExpanded] = useState(false);
   const unit = HEALTH_UNITS.find(u => u.id === audit.unitId);
   
@@ -935,26 +937,30 @@ const AuditRow: React.FC<{
                         <Eye className="w-3.5 h-3.5" />
                         Visualizar Detalhes
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEdit(audit);
-                        }}
-                        className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black uppercase tracking-wider rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                     >
-                       <Pencil className="w-3 h-3" />
-                       Editar Registro
-                     </button>
-                     <button
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         onDelete(audit);
-                       }}
-                       className="w-full px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 text-[10px] font-black uppercase tracking-wider rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                     >
-                       <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                       Excluir Registro
-                     </button>
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(audit);
+                          }}
+                          className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black uppercase tracking-wider rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          Editar Registro
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(audit);
+                          }}
+                          className="w-full px-3 py-2 bg-white border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 text-[10px] font-black uppercase tracking-wider rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                          Excluir Registro
+                        </button>
+                      )}
                    </div>
                  </div>
                  

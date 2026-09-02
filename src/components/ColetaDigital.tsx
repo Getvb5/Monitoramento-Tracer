@@ -53,7 +53,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   const [activeTracer, setActiveTracer] = useState<string | null>(null);
   const [editingAudit, setEditingAudit] = useState<any | null>(null);
   const [auditSuccess, setAuditSuccess] = useState(false);
-  const [auditScopeTab, setAuditScopeTab] = useState<'my' | 'unit' | 'all'>('all');
+  const [auditScopeTab, setAuditScopeTab] = useState<'my' | 'unit' | 'all'>(isAdmin ? 'all' : 'unit');
   const [recentAudits, setRecentAudits] = useState<{
     my: any[];
     unit: any[];
@@ -178,11 +178,11 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
         
         // Filter by unit (all colleagues from the same unit)
         const unit = effectiveUnit 
-          ? sorted.filter(a => a.unitId === effectiveUnit || a.hospitalId === effectiveUnit)
-          : sorted;
+          ? sorted.filter(a => a.unitId === effectiveUnit || a.hospitalId === effectiveUnit || a.unidadeId === effectiveUnit)
+          : (isAdmin ? sorted : []);
 
-        // All audits (for system-wide / admin view)
-        const all = sorted;
+        // All audits (strictly restricted to unit for non-admins to prevent network leaks)
+        const all = isAdmin ? sorted : unit;
 
         setRecentAudits({ my, unit, all });
       };
@@ -765,18 +765,20 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                       Coletas da Unidade ({recentAudits.unit.length})
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setAuditScopeTab('all')}
-                      className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                        auditScopeTab === 'all'
-                          ? 'bg-white text-blue-700 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      Todas as Coletas ({recentAudits.all.length})
-                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setAuditScopeTab('all')}
+                        className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                          auditScopeTab === 'all'
+                            ? 'bg-white text-blue-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        Todas as Coletas da Rede ({recentAudits.all.length})
+                      </button>
+                    )}
                   </div>
                 </div>
                 
@@ -786,7 +788,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                       ? recentAudits.my 
                       : auditScopeTab === 'unit' 
                         ? recentAudits.unit 
-                        : recentAudits.all;
+                        : (isAdmin ? recentAudits.all : recentAudits.unit);
 
                     if (currentList.length === 0) {
                       if (auditScopeTab === 'my') {
@@ -797,10 +799,10 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                             </div>
                             <div className="space-y-1 max-w-md mx-auto">
                               <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                                Nenhuma Coleta Registrada com Este Usuário
+                                Nenhuma Coleta Registrada com Seu Usuário
                               </h4>
                               <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                                Você está no filtro de <strong>Minhas Coletas</strong>. As auditorias salvas por outros usuários ou administradores estão disponíveis nas abas <strong>Coletas da Unidade</strong> e <strong>Todas as Coletas</strong>.
+                                Você está no filtro de <strong>Minhas Coletas</strong>. As auditorias salvas por outros profissionais da sua unidade estão na aba <strong>Coletas da Unidade</strong>.
                               </p>
                               <div className="pt-3 flex flex-wrap items-center justify-center gap-2">
                                 <button
@@ -810,13 +812,15 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                                 >
                                   Ver Coletas da Unidade ({recentAudits.unit.length})
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setAuditScopeTab('all')}
-                                  className="px-3.5 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-800 text-[10px] font-black uppercase tracking-wider rounded-md transition-all shadow-2xs"
-                                >
-                                  Ver Todas as Coletas ({recentAudits.all.length})
-                                </button>
+                                {isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAuditScopeTab('all')}
+                                    className="px-3.5 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-800 text-[10px] font-black uppercase tracking-wider rounded-md transition-all shadow-2xs"
+                                  >
+                                    Ver Todas as Coletas ({recentAudits.all.length})
+                                  </button>
+                                )}
                                 {profileSaved && (
                                   <button
                                     type="button"
@@ -913,28 +917,32 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                                 </div>
                                 
                                 <div className="flex items-center gap-1 sm:gap-2" onClick={(e) => e.stopPropagation()}>
-                                  <button 
-                                    onClick={() => {
-                                      setEditingAudit(item);
-                                      if (item.type === 'T01') setActiveTracer('tracer_01');
-                                      else if (item.type === 'T02') setActiveTracer('tracer_02');
-                                      else if (item.type === 'T03') setActiveTracer('tracer_03');
-                                    }}
-                                    className="p-1 px-2.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white rounded-md transition-all text-[9.5px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-xs border border-indigo-100"
-                                    title="Editar Coleta"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5 shrink-0" />
-                                    <span className="hidden xs:inline">Editar</span>
-                                  </button>
+                                  {(isAdmin || isMine) && (
+                                    <button 
+                                      onClick={() => {
+                                        setEditingAudit(item);
+                                        if (item.type === 'T01') setActiveTracer('tracer_01');
+                                        else if (item.type === 'T02') setActiveTracer('tracer_02');
+                                        else if (item.type === 'T03') setActiveTracer('tracer_03');
+                                      }}
+                                      className="p-1 px-2.5 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white rounded-md transition-all text-[9.5px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-xs border border-indigo-100"
+                                      title="Editar Coleta"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5 shrink-0" />
+                                      <span className="hidden xs:inline">Editar</span>
+                                    </button>
+                                  )}
                                   
-                                  <button 
-                                    onClick={() => setDeletingAudit({ id: item.id, type: item.type })}
-                                    className="p-1 px-2.5 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white rounded-md transition-all text-[9.5px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-xs border border-rose-100"
-                                    title="Excluir Coleta"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 shrink-0" />
-                                    <span className="hidden xs:inline">Excluir</span>
-                                  </button>
+                                  {(isAdmin || isMine) && (
+                                    <button 
+                                      onClick={() => setDeletingAudit({ id: item.id, type: item.type })}
+                                      className="p-1 px-2.5 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white rounded-md transition-all text-[9.5px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-xs border border-rose-100"
+                                      title="Excluir Coleta"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                                      <span className="hidden xs:inline">Excluir</span>
+                                    </button>
+                                  )}
 
                                   <div 
                                     onClick={() => setSelectedAudit(item)}
