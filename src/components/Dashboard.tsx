@@ -390,12 +390,16 @@ export default function Dashboard({
     let patients = patientAudits;
     let surgeries = surgeryAudits;
 
-    const targetUnit = globalUnit || '';
+    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     if (targetUnit) {
       const filter = (a: any) => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit;
       hands = hands.filter(filter);
       patients = patients.filter(filter);
       surgeries = surgeries.filter(filter);
+    } else if (!isAdmin) {
+      hands = [];
+      patients = [];
+      surgeries = [];
     }
 
     if (globalMonth !== '') {
@@ -1131,7 +1135,7 @@ export default function Dashboard({
     const effectiveUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     const unitsList = effectiveUnit
       ? HEALTH_UNITS.filter(u => u.id === effectiveUnit)
-      : HEALTH_UNITS;
+      : (isAdmin ? HEALTH_UNITS : []);
 
     return [
       { 
@@ -1538,7 +1542,9 @@ export default function Dashboard({
                     <div className="flex flex-col">
                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{tracer.id}</span>
                       <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight mt-1">{tracer.name}</h4>
-                      <span className="text-[8px] font-extrabold text-blue-600 uppercase tracking-widest mt-0.5">Top 5 Unidades</span>
+                      <span className="text-[8px] font-extrabold text-blue-600 uppercase tracking-widest mt-0.5">
+                        {isAdmin && !globalUnit ? 'Top 5 Unidades' : 'Sua Unidade'}
+                      </span>
                     </div>
                     <div className={`w-10 h-10 ${tracer.color} text-white rounded-xl flex items-center justify-center font-black text-sm shadow-sm shrink-0`}>
                       {tracer.count}

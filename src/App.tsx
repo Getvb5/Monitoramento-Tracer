@@ -371,6 +371,16 @@ export default function App() {
     };
   }, [user]);
 
+  // Enforce strict auditor confinement to their assigned unit & protect admin routes
+  useEffect(() => {
+    if (!isAdmin && userUnit) {
+      setGlobalUnit(userUnit);
+      if (view === 'schedules' || view === 'data_mgmt') {
+        setView('dashboard');
+      }
+    }
+  }, [isAdmin, userUnit, view]);
+
   // Information Architecture Metadata & Breadcrumbs
   const viewMetadata: Record<View, { section: string; title: string; subtitle: string }> = {
     dashboard: {
@@ -416,7 +426,7 @@ export default function App() {
     setGlobalMonth('');
     setGlobalQuarter('');
     setGlobalDay('');
-    setGlobalUnit('');
+    setGlobalUnit(!isAdmin && userUnit ? userUnit : '');
     setGlobalType('');
     setGlobalTracer('');
     setExplorerFilter('');
@@ -427,11 +437,11 @@ export default function App() {
     if (globalMonth !== '') count++;
     if (globalQuarter !== '') count++;
     if (globalDay !== '') count++;
-    if (globalUnit !== '') count++;
+    if (isAdmin && globalUnit !== '') count++;
     if (globalTracer !== '') count++;
     if (explorerFilter !== '') count++;
     return count;
-  }, [globalMonth, globalQuarter, globalDay, globalUnit, globalTracer, explorerFilter]);
+  }, [globalMonth, globalQuarter, globalDay, globalUnit, globalTracer, explorerFilter, isAdmin]);
 
   const isFilterActive = activeFiltersCount > 0;
 
@@ -813,14 +823,16 @@ export default function App() {
           <div className="space-y-1 pt-1 border-t border-white/5">
             <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none flex items-center gap-1.5">
               <Database className="w-3 h-3 text-blue-300" />
-              <span>Gestão do Sistema</span>
+              <span>{isAdmin ? 'Gestão do Sistema' : 'Suporte & Ajuda'}</span>
             </div>
-            <SidebarButton 
-              active={view === 'schedules'} 
-              onClick={() => { setView('schedules'); setExplorerFilter(''); }}
-              icon={<RefreshCw className="w-4 h-4" />}
-              label="Sincronização & Fontes"
-            />
+            {isAdmin && (
+              <SidebarButton 
+                active={view === 'schedules'} 
+                onClick={() => { setView('schedules'); setExplorerFilter(''); }}
+                icon={<RefreshCw className="w-4 h-4" />}
+                label="Sincronização & Fontes"
+              />
+            )}
             <SidebarButton 
               active={false} 
               onClick={() => setIsGuideModalOpen(true)}
@@ -963,14 +975,16 @@ export default function App() {
 
                 <div className="space-y-1 pt-1 border-t border-white/5">
                   <div className="px-3 pb-1 text-[8px] font-black tracking-widest text-blue-200/60 uppercase select-none">
-                    Gestão
+                    {isAdmin ? 'Gestão' : 'Suporte'}
                   </div>
-                  <SidebarButton 
-                    active={view === 'schedules'} 
-                    onClick={() => { setView('schedules'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
-                    icon={<RefreshCw className="w-4 h-4" />}
-                    label="Sincronização & Fontes"
-                  />
+                  {isAdmin && (
+                    <SidebarButton 
+                      active={view === 'schedules'} 
+                      onClick={() => { setView('schedules'); setExplorerFilter(''); setMobileSidebarOpen(false); }}
+                      icon={<RefreshCw className="w-4 h-4" />}
+                      label="Sincronização & Fontes"
+                    />
+                  )}
                   <SidebarButton 
                     active={false} 
                     onClick={() => { setIsGuideModalOpen(true); setMobileSidebarOpen(false); }}
@@ -1297,13 +1311,17 @@ export default function App() {
               
               {/* Unidade de Saúde */}
               <select 
-                value={globalUnit}
-                onChange={(e) => setGlobalUnit(e.target.value)}
-                className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1 max-w-[140px] truncate"
+                value={isAdmin ? globalUnit : (userUnit || '')}
+                onChange={(e) => isAdmin && setGlobalUnit(e.target.value)}
+                disabled={!isAdmin && !!userUnit}
+                className={`bg-transparent text-[10px] font-black uppercase outline-none pr-1 max-w-[140px] truncate ${
+                  !isAdmin ? 'cursor-not-allowed opacity-95 text-blue-900 font-extrabold' : 'cursor-pointer text-slate-700'
+                }`}
                 aria-label="Filtro de Unidade de Saúde"
+                title={!isAdmin ? 'Sua unidade vinculada de auditoria' : 'Filtro de unidade de saúde'}
               >
-                <option value="">Todas Unidades</option>
-                {HEALTH_UNITS.map(u => (
+                {isAdmin && <option value="">Todas Unidades</option>}
+                {HEALTH_UNITS.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => (
                   <option key={u.id} value={u.id}>{u.name.replace('Hospital de Pediatria ', '').replace('Policlínica e Maternidade ', '')}</option>
                 ))}
               </select>
@@ -1412,15 +1430,18 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200">
+                <div className={`flex items-center gap-2 bg-white rounded-xl px-3 py-2 border border-slate-200 ${!isAdmin ? 'bg-slate-50' : ''}`}>
                   <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
                   <select 
-                    value={globalUnit}
-                    onChange={(e) => setGlobalUnit(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
+                    value={isAdmin ? globalUnit : (userUnit || '')}
+                    onChange={(e) => isAdmin && setGlobalUnit(e.target.value)}
+                    disabled={!isAdmin && !!userUnit}
+                    className={`bg-transparent text-xs font-bold outline-none w-full ${
+                      !isAdmin ? 'cursor-not-allowed opacity-95 text-blue-900 font-black' : 'text-slate-700'
+                    }`}
                   >
-                    <option value="">Unidade: Todas</option>
-                    {HEALTH_UNITS.map(u => (
+                    {isAdmin && <option value="">Unidade: Todas</option>}
+                    {HEALTH_UNITS.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => (
                       <option key={u.id} value={u.id}>{u.name}</option>
                     ))}
                   </select>
@@ -1481,24 +1502,18 @@ export default function App() {
             </div>
           )}
 
-          {/* Quick Alert Info (if user lacks data / isAdmin toggle) */}
+          {/* Quick Alert Info (if auditor is logged in) */}
           {!isAdmin && userUnit && (
-            <div className="bg-blue-50/50 border border-blue-200/60 rounded-2xl p-4.5 flex items-center justify-between flex-wrap gap-3.5">
-              <div className="flex items-center gap-3.5">
+            <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3.5">
+              <div className="flex items-center gap-3">
                 <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
-                <p className="text-xs text-blue-800 font-bold uppercase tracking-tight text-left">
-                  Perfil Auditor: Unidade vinculada: <span className="underline font-black">{HEALTH_UNITS.find(u => u.id === userUnit)?.name}</span>.
+                <p className="text-xs text-blue-900 font-bold uppercase tracking-tight text-left">
+                  Perfil Auditor: Acesso restrito à unidade vinculada: <span className="underline font-black">{HEALTH_UNITS.find(u => u.id === userUnit)?.name || userUnit}</span>
                 </p>
               </div>
-              {globalUnit !== '' && (
-                <button
-                  type="button"
-                  onClick={() => setGlobalUnit('')}
-                  className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-white hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg cursor-pointer transition-all"
-                >
-                  Ver Todas as Unidades
-                </button>
-              )}
+              <span className="text-[9px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 px-2.5 py-1 rounded-lg border border-blue-200 select-none">
+                Unidade Fixa
+              </span>
             </div>
           )}
 

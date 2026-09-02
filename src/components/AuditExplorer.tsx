@@ -276,7 +276,7 @@ export default function AuditExplorer({
     try {
       setIsExporting(true);
       const deletedIds = getDeletedAuditIds();
-      const dataset = exportFullDatabase 
+      const dataset = exportFullDatabase && isAdmin
         ? [...handAudits, ...patientAudits, ...surgeryAudits].filter(a => !deletedIds.includes(a.id))
         : allAudits;
 
@@ -322,9 +322,11 @@ export default function AuditExplorer({
     let combined = [...handAudits, ...patientAudits, ...surgeryAudits].filter(a => !deletedIds.includes(a.id));
     
     // 1. Filter by Effective Unit
-    const targetUnit = globalUnit || '';
+    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
     if (targetUnit) {
       combined = combined.filter(a => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit);
+    } else if (!isAdmin) {
+      combined = [];
     }
     
     // 2. Filter by local Tracer selection

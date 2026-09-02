@@ -74,8 +74,13 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
   }, [selectedUnitId, patientAudits, surgeryAudits, handAudits]);
 
   const globalTotal = useMemo(() => {
+    if (!isAdmin && userUnit) {
+      return [...patientAudits, ...surgeryAudits, ...handAudits].filter(a => 
+        a.unitId === userUnit || a.hospitalId === userUnit || a.unidadeId === userUnit
+      ).length;
+    }
     return patientAudits.length + surgeryAudits.length + handAudits.length;
-  }, [patientAudits, surgeryAudits, handAudits]);
+  }, [patientAudits, surgeryAudits, handAudits, isAdmin, userUnit]);
 
   if (loading) return <div className="h-64 flex items-center justify-center text-slate-400">Carregando painel de unidades...</div>;
 
@@ -93,26 +98,32 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h1 className="text-xl font-black text-slate-900 tracking-tight uppercase">Visualização por Unidade</h1>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Acesse os indicadores específicos de cada estabelecimento</p>
+                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                  {isAdmin ? 'Acesse os indicadores específicos de cada estabelecimento' : 'Indicadores específicos da sua unidade vinculada'}
+                </p>
               </div>
               <div className="flex items-center gap-4">
                 <div className="bg-slate-900 text-white px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
                   <Database className="w-4 h-4 text-blue-400" />
                   <div className="flex flex-col">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase leading-none">Base Geral</span>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase leading-none">
+                      {isAdmin ? 'Base Geral' : 'Total da Unidade'}
+                    </span>
                     <span className="text-sm font-black tracking-tighter leading-none mt-1">{globalTotal} registros</span>
                   </div>
                 </div>
-                <div className="relative w-full md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input 
-                    type="text"
-                    placeholder="Buscar unidade..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
-                  />
-                </div>
+                {isAdmin && (
+                  <div className="relative w-full md:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input 
+                      type="text"
+                      placeholder="Buscar unidade..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -157,12 +168,15 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
             className="space-y-6"
           >
             <header className="flex items-center gap-4">
-              <button 
-                onClick={() => setSelectedUnitId(null)}
-                className="p-2 bg-white border border-slate-200 text-slate-400 rounded-lg hover:bg-slate-50 hover:text-slate-600 transition-all"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </button>
+              {isAdmin && (
+                <button 
+                  onClick={() => setSelectedUnitId(null)}
+                  className="p-2 bg-white border border-slate-200 text-slate-400 rounded-lg hover:bg-slate-50 hover:text-slate-600 transition-all cursor-pointer"
+                  title="Voltar à lista de unidades"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+              )}
               <div>
                 <h1 className="text-lg font-black text-slate-900 tracking-tight uppercase leading-none">{selectedUnit?.name}</h1>
                 <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mt-1">{selectedUnit?.district} • Indicadores Consolidados</p>
