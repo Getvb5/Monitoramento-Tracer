@@ -390,7 +390,7 @@ export default function Dashboard({
     let patients = patientAudits;
     let surgeries = surgeryAudits;
 
-    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
+    const targetUnit = globalUnit || '';
     if (targetUnit) {
       const filter = (a: any) => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit;
       hands = hands.filter(filter);

@@ -387,9 +387,9 @@ export default function App() {
     };
   }, [user]);
 
-  // Sync globalUnit to user limit if not admin
+  // Auto-initialize globalUnit to userUnit if empty upon login, but allow freedom to change or clear
   useEffect(() => {
-    if (!isAdmin && userUnit) {
+    if (!isAdmin && userUnit && globalUnit === '') {
       setGlobalUnit(userUnit);
     }
   }, [isAdmin, userUnit]);
@@ -439,9 +439,7 @@ export default function App() {
     setGlobalMonth('');
     setGlobalQuarter('');
     setGlobalDay('');
-    if (isAdmin || !userUnit) {
-      setGlobalUnit('');
-    }
+    setGlobalUnit('');
     setGlobalType('');
     setGlobalTracer('');
     setExplorerFilter('');
@@ -452,11 +450,11 @@ export default function App() {
     if (globalMonth !== '') count++;
     if (globalQuarter !== '') count++;
     if (globalDay !== '') count++;
-    if (globalUnit !== '' && (isAdmin || !userUnit)) count++;
+    if (globalUnit !== '') count++;
     if (globalTracer !== '') count++;
     if (explorerFilter !== '') count++;
     return count;
-  }, [globalMonth, globalQuarter, globalDay, globalUnit, globalTracer, explorerFilter, isAdmin, userUnit]);
+  }, [globalMonth, globalQuarter, globalDay, globalUnit, globalTracer, explorerFilter]);
 
   const isFilterActive = activeFiltersCount > 0;
 
@@ -1324,7 +1322,6 @@ export default function App() {
               <select 
                 value={globalUnit}
                 onChange={(e) => setGlobalUnit(e.target.value)}
-                disabled={!isAdmin && !!userUnit}
                 className="bg-transparent text-[10px] font-black uppercase text-slate-700 outline-none cursor-pointer pr-1 max-w-[140px] truncate"
                 aria-label="Filtro de Unidade de Saúde"
               >
@@ -1443,7 +1440,6 @@ export default function App() {
                   <select 
                     value={globalUnit}
                     onChange={(e) => setGlobalUnit(e.target.value)}
-                    disabled={!isAdmin && !!userUnit}
                     className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full"
                   >
                     <option value="">Unidade: Todas</option>
@@ -1508,13 +1504,24 @@ export default function App() {
             </div>
           )}
 
-          {/* Quick Alert Warning (if user lacks data / isAdmin toggle) */}
+          {/* Quick Alert Info (if user lacks data / isAdmin toggle) */}
           {!isAdmin && userUnit && (
-            <div className="bg-blue-50/50 border border-blue-200/60 rounded-2xl p-4.5 flex items-center gap-3.5">
-              <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
-              <p className="text-xs text-blue-800 font-bold uppercase tracking-tight text-left">
-                Identificação segura de unidade: <span className="underline font-black">{HEALTH_UNITS.find(u => u.id === userUnit)?.name}</span>. Você possui permissão para visualizar e consolidar os relatórios da sua respectiva unidade.
-              </p>
+            <div className="bg-blue-50/50 border border-blue-200/60 rounded-2xl p-4.5 flex items-center justify-between flex-wrap gap-3.5">
+              <div className="flex items-center gap-3.5">
+                <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
+                <p className="text-xs text-blue-800 font-bold uppercase tracking-tight text-left">
+                  Perfil Auditor: Unidade vinculada: <span className="underline font-black">{HEALTH_UNITS.find(u => u.id === userUnit)?.name}</span>.
+                </p>
+              </div>
+              {globalUnit !== '' && (
+                <button
+                  type="button"
+                  onClick={() => setGlobalUnit('')}
+                  className="text-[10px] font-black uppercase tracking-wider text-blue-700 bg-white hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-lg cursor-pointer transition-all"
+                >
+                  Ver Todas as Unidades
+                </button>
+              )}
             </div>
           )}
 

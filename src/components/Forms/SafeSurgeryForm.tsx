@@ -393,6 +393,8 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
       const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
       const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
 
+      const auditorName = formData.q6_nome_auditor || formData.q5_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+
       // 1. Immediately persist locally
       try {
         const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
@@ -400,6 +402,7 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
           id: activeDocId,
           unitId,
           auditorId: user.uid,
+          auditorName,
           tracerNumber: '02',
           tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
           type: 'T02',
@@ -421,6 +424,10 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
             setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
               unitId,
               auditorId: user.uid,
+              auditorName,
+              type: 'T02',
+              competencia: dynamicCompetencia,
+              timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
               ...scorePayload,
               rawData,
               sourceRowHash: JSON.stringify(rawData),

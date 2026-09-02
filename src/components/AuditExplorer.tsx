@@ -322,7 +322,7 @@ export default function AuditExplorer({
     let combined = [...handAudits, ...patientAudits, ...surgeryAudits].filter(a => !deletedIds.includes(a.id));
     
     // 1. Filter by Effective Unit
-    const targetUnit = isAdmin ? (globalUnit || '') : (userUnit || '');
+    const targetUnit = globalUnit || '';
     if (targetUnit) {
       combined = combined.filter(a => a.unitId === targetUnit || a.hospitalId === targetUnit || a.unidadeId === targetUnit);
     }

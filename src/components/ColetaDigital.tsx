@@ -200,9 +200,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
         const { db } = await import('../lib/firebase');
 
         const fetchCollection = async (collName: string, type: 'T01' | 'T02' | 'T03', tracerName: string) => {
-          const q = effectiveUnit
-            ? query(collection(db, collName), where('unitId', '==', effectiveUnit), limit(100))
-            : query(collection(db, collName), limit(100));
+          const q = query(collection(db, collName), limit(150));
           const snapshot = await getDocs(q);
           return snapshot.docs.map(doc => {
             const data = doc.data();
@@ -768,20 +766,18 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                       Coletas da Unidade ({recentAudits.unit.length})
                     </button>
 
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => setAuditScopeTab('all')}
-                        className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                          auditScopeTab === 'all'
-                            ? 'bg-white text-blue-700 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        Geral ({recentAudits.all.length})
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setAuditScopeTab('all')}
+                      className={`px-3 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                        auditScopeTab === 'all'
+                          ? 'bg-white text-blue-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Todas as Coletas ({recentAudits.all.length})
+                    </button>
                   </div>
                 </div>
                 
@@ -802,18 +798,25 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                             </div>
                             <div className="space-y-1 max-w-md mx-auto">
                               <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider">
-                                Nenhuma Coleta Registrada por Você Ainda
+                                Nenhuma Coleta Registrada com Este Usuário
                               </h4>
                               <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
-                                As auditorias existentes na sua unidade foram registradas por outros colegas ou sincronizadas de formulários anteriores.
+                                Você está no filtro de <strong>Minhas Coletas</strong>. As auditorias salvas por outros usuários ou administradores estão disponíveis nas abas <strong>Coletas da Unidade</strong> e <strong>Todas as Coletas</strong>.
                               </p>
-                              <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+                              <div className="pt-3 flex flex-wrap items-center justify-center gap-2">
                                 <button
                                   type="button"
                                   onClick={() => setAuditScopeTab('unit')}
-                                  className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[10px] font-black uppercase tracking-wider rounded-md transition-all"
+                                  className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[10px] font-black uppercase tracking-wider rounded-md transition-all shadow-2xs"
                                 >
-                                  Ver Coletas dos Colegas ({recentAudits.unit.length})
+                                  Ver Coletas da Unidade ({recentAudits.unit.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAuditScopeTab('all')}
+                                  className="px-3.5 py-1.5 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-800 text-[10px] font-black uppercase tracking-wider rounded-md transition-all shadow-2xs"
+                                >
+                                  Ver Todas as Coletas ({recentAudits.all.length})
                                 </button>
                                 {profileSaved && (
                                   <button
@@ -821,7 +824,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                                     onClick={() => setActiveTracer('tracer_01')}
                                     className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-wider rounded-md shadow-xs transition-all"
                                   >
-                                    Fazer Minha 1ª Coleta
+                                    Fazer Nova Coleta
                                   </button>
                                 )}
                               </div>
