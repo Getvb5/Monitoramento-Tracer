@@ -18,13 +18,16 @@ import {
   X,
   Search,
   Trash2,
-  Pencil
+  Pencil,
+  FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PatientIdForm from './Forms/PatientIdForm';
 import SafeSurgeryForm from './Forms/SafeSurgeryForm';
 import HandHygieneForm from './Forms/HandHygieneForm';
 import { getCustomLocalAudits } from '../lib/fallbackData';
+import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
+import { getAllWebhookUrls, getPendingQueue } from '../lib/googleSheetWebhook';
 
 interface Props {
   user: User;
@@ -62,6 +65,12 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   const [profileError, setProfileError] = useState('');
   const [deletingAudit, setDeletingAudit] = useState<{ id: string; type: string } | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+
+  useEffect(() => {
+    setPendingQueueCount(getPendingQueue().length);
+  }, [isWebhookModalOpen, activeTracer, auditSuccess]);
 
   const triggerToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -241,6 +250,9 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
   const handleDeleteAudit = async (id: string, type: string) => {
     try {
+      // Find audit details before deletion for spreadsheet synchronization
+      const existingAudit = recentAudits.find(a => a.id === id);
+
       // 1. Delete from local database / local storage
       const { deleteAuditFromLocal } = await import('../lib/fallbackData');
       deleteAuditFromLocal(id);
@@ -263,18 +275,35 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
           }
         }
       }
+
+      // 3. Dispatch deletion to Destination Google Sheets Webhook
+      try {
+        const { deleteAuditFromGoogleSheet } = await import('../lib/googleSheetWebhook');
+        const tracerId = type === 'T01' ? 'tracer_01' : type === 'T02' ? 'tracer_02' : 'tracer_03';
+        await deleteAuditFromGoogleSheet({
+          id,
+          tracerId,
+          type,
+          patientName: existingAudit?.patientName || existingAudit?.rawData?.['Nome do Paciente'] || existingAudit?.rawData?.['q4_paciente'] || '',
+          unitName: existingAudit?.unitName || existingAudit?.unitId || existingAudit?.rawData?.['Unidade de Saúde'] || '',
+          timestamp: existingAudit?.timestamp || existingAudit?.date || existingAudit?.rawData?.['Carimbo de data/hora'] || '',
+          rawData: existingAudit?.rawData || {}
+        });
+      } catch (sheetErr) {
+        console.warn('[ColetaDigital] Erro ao excluir na planilha destino:', sheetErr);
+      }
       
-      // 3. Close details if active
+      // 4. Close details if active
       if (selectedAudit && selectedAudit.id === id) {
         setSelectedAudit(null);
       }
       
-      // 4. Reload lists
+      // 5. Reload lists
       loadRecentAudits();
       
       // Dispatch event to update other dashboard components
       window.dispatchEvent(new Event('local-data-updated'));
-      triggerToast("Coleta excluída com sucesso!", "success");
+      triggerToast("Coleta excluída do sistema e da planilha com sucesso!", "success");
     } catch (err) {
       console.error("Erro ao excluir coleta:", err);
       triggerToast("Não foi possível excluir a coleta.", "error");
@@ -360,14 +389,24 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 sm:px-6 space-y-8" id="coleta-digital-root">
       {/* Header Title */}
-      <div className="space-y-2">
-        <h1 className="text-3xl font-black uppercase text-slate-900 tracking-tight flex items-center gap-3">
-          <ClipboardCheck className="w-8 h-8 text-blue-600" />
-          INICIAR TRACER
-        </h1>
-        <p className="text-slate-500 text-sm font-medium">
-          Transforme as auditorias de campo em registros digitais estruturados com sincronização em tempo real e suporte offline.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-black uppercase text-slate-900 tracking-tight flex items-center gap-3">
+            <ClipboardCheck className="w-8 h-8 text-blue-600" />
+            INICIAR TRACER
+          </h1>
+          <p className="text-slate-500 text-xs sm:text-sm font-medium">
+            Transforme as auditorias de campo em registros digitais estruturados com sincronização em tempo real na planilha Google Sheets e Firestore.
+          </p>
+        </div>
+
+        <button
+          onClick={() => setIsWebhookModalOpen(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm active:scale-95 shrink-0"
+        >
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+          Planilha Destino {pendingQueueCount > 0 && `(${pendingQueueCount} pendentes)`}
+        </button>
       </div>
 
       {/* Profile Notice & Form */}
@@ -549,20 +588,20 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
               </div>
 
               {auditSuccess ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-8 text-center space-y-6 shadow-sm">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center space-y-6 shadow-sm">
                   <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
                     <CheckCircle2 className="w-10 h-10" />
                   </div>
                   <div className="space-y-2">
                     <h3 className="text-xl font-extrabold text-emerald-900 uppercase tracking-tight">Coleta Executada com Sucesso!</h3>
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider max-w-md mx-auto">
-                      A auditoria do beira leito foi guardada localmente e está segura para sincronização dinâmica na sua planilha e painéis.
+                    <p className="text-slate-600 text-xs font-medium max-w-lg mx-auto leading-relaxed">
+                      A auditoria foi registrada com sucesso, sincronizada no banco de dados Firestore e enviada para a planilha Google Sheets de destino configurada.
                     </p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
                     <button 
                       onClick={() => setAuditSuccess(false)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-md text-xs font-extrabold uppercase tracking-widest transition-all shadow-md hover:shadow-lg"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl text-xs font-extrabold uppercase tracking-widest transition-all shadow-md hover:shadow-lg active:scale-95"
                     >
                       Nova Coleta Deste Tracer
                     </button>
@@ -571,9 +610,16 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                         setActiveTracer(null);
                         setAuditSuccess(false);
                       }}
-                      className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-md text-xs font-extrabold uppercase tracking-widest transition-all shadow-md hover:shadow-lg"
+                      className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl text-xs font-extrabold uppercase tracking-widest transition-all shadow-md hover:shadow-lg active:scale-95"
                     >
                       Ir para Instrumentos
+                    </button>
+                    <button
+                      onClick={() => setIsWebhookModalOpen(true)}
+                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      Ver Planilhas Destino
                     </button>
                   </div>
                 </div>
@@ -1264,6 +1310,12 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Google Sheets Webhook Destination Modal */}
+      <GoogleSheetWebhookModal
+        isOpen={isWebhookModalOpen}
+        onClose={() => setIsWebhookModalOpen(false)}
+      />
     </div>
   );
 }

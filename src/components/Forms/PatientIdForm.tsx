@@ -301,19 +301,33 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
     }
     setError('');
     setCurrentStep(prev => Math.min(prev + 1, 5));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBack = () => {
     setError('');
     setCurrentStep(prev => Math.max(prev - 1, 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
-    const validationError = validateStep(5);
-    if (validationError) {
-      setError(validationError);
+
+    // Prevent submission if not on final step
+    if (currentStep !== 5) {
+      handleNext();
       return;
+    }
+
+    // Validate all steps from 1 to 5
+    for (let step = 1; step <= 5; step++) {
+      const validationError = validateStep(step);
+      if (validationError) {
+        setError(validationError);
+        setCurrentStep(step);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -443,6 +457,21 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
         }
       }
 
+      // 3. Dispatch to destination Google Sheet Webhook if configured
+      try {
+        const { sendAuditToGoogleSheet } = await import('../../lib/googleSheetWebhook');
+        await sendAuditToGoogleSheet({
+          id: activeDocId,
+          tracerId: 'tracer_01',
+          type: 'T01',
+          rawData,
+          patientName,
+          unitName
+        });
+      } catch (sheetErr) {
+        console.warn('[PatientIdForm] Google Sheet webhook notice:', sheetErr);
+      }
+
       window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
@@ -487,6 +516,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
           {steps.map((s) => (
             <button
               key={s.id}
+              type="button"
               disabled={submitting}
               onClick={() => {
                 if (s.id < currentStep) setCurrentStep(s.id);
@@ -532,7 +562,15 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
         </div>
 
         {/* Main Panel Form */}
-        <form onSubmit={handleSubmit} className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[460px] flex flex-col justify-between p-6 sm:p-8 space-y-6">
+        <form
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+              e.preventDefault();
+            }
+          }}
+          className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[460px] flex flex-col justify-between p-6 sm:p-8 space-y-6"
+        >
           <div className="space-y-6">
             <AnimatePresence mode="wait">
               <motion.div

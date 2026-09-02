@@ -391,10 +391,22 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
-    const validationError = validateStep(5);
-    if (validationError) {
-      setError(validationError);
+
+    // Prevent submission if not on final step
+    if (currentStep !== 5) {
+      handleNext();
       return;
+    }
+
+    // Validate all steps from 1 to 5
+    for (let s = 1; s <= 5; s++) {
+      const validationError = validateStep(s);
+      if (validationError) {
+        setError(validationError);
+        setCurrentStep(s);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -543,6 +555,21 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
         }
       }
 
+      // 3. Dispatch to destination Google Sheet Webhook if configured
+      try {
+        const { sendAuditToGoogleSheet } = await import('../../lib/googleSheetWebhook');
+        await sendAuditToGoogleSheet({
+          id: activeDocId,
+          tracerId: 'tracer_03',
+          type: 'T03',
+          rawData,
+          patientName,
+          unitName
+        });
+      } catch (sheetErr) {
+        console.warn('[HandHygieneForm] Google Sheet webhook notice:', sheetErr);
+      }
+
       window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
@@ -648,6 +675,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
           {steps.map((s) => (
             <button
               key={s.id}
+              type="button"
               disabled={submitting}
               onClick={() => {
                 if (s.id < currentStep) setCurrentStep(s.id);
@@ -692,7 +720,15 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
         </div>
 
         {/* Form panel */}
-        <form onSubmit={handleSubmit} className="flex-1 theme-card border-none ring-1 ring-slate-200 p-6 sm:p-8 space-y-6">
+        <form
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+              e.preventDefault();
+            }
+          }}
+          className="flex-1 theme-card border-none ring-1 ring-slate-200 p-6 sm:p-8 space-y-6"
+        >
           <AnimatePresence mode="wait">
             <motion.div
               key={currentStep}

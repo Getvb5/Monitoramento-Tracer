@@ -270,6 +270,77 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
       if (!formData.q6_prontuario.trim()) return 'Insira o prontuário do paciente.';
       if (!formData.q7_procedimento.trim()) return 'Insira o tipo de procedimento.';
     }
+    if (stepNum === 2) {
+      if (!formData.q8_pulseira_branca) return 'Responda se o paciente está identificado com pulseira branca.';
+      if (formData.q8_pulseira_branca === 'Não' && !formData.q8_pulseira_branca_justificativa.trim()) return 'Justifique a pulseira branca.';
+      if (!formData.q9_pulseira_legivel) return 'Responda se a pulseira de identificação está legível.';
+      if (formData.q9_pulseira_legivel === 'Não' && !formData.q9_pulseira_legivel_justificativa.trim()) return 'Justifique a legibilidade da pulseira.';
+      if (!formData.q10_pulseira_preenchida) return 'Responda se a pulseira está preenchida adequadamente.';
+      if (formData.q10_pulseira_preenchida === 'Não' && !formData.q10_pulseira_preenchida_justificativa.trim()) return 'Justifique o preenchimento da pulseira.';
+      if (!formData.q11_alergia) return 'Responda se o paciente tem alguma alergia.';
+      if (formData.q11_alergia === 'Sim') {
+        if (!formData.q11_alergia_sinalizada) return 'Responda se a alergia está sinalizada com pulseira rosa.';
+        if (formData.q11_alergia_sinalizada === 'Não' && !formData.q11_alergia_justificativa.trim()) return 'Justifique a falta de pulseira rosa.';
+      }
+      if (!formData.q12_termo_cirurgico) return 'Responda sobre o termo de consentimento cirúrgico.';
+      if (formData.q12_termo_cirurgico === 'Não' && !formData.q12_termo_cirurgico_justificativa.trim()) return 'Justifique ausência do termo cirúrgico.';
+      if (!formData.q13_termo_anestesico) return 'Responda sobre o termo de consentimento anestésico.';
+      if (formData.q13_termo_anestesico === 'Não' && !formData.q13_termo_anestesico_justificativa.trim()) return 'Justifique ausência do termo anestésico.';
+      if (!formData.q14_visita_pre_anestesica) return 'Responda sobre a visita pré-anestésica.';
+      if (formData.q14_visita_pre_anestesica === 'Não' && !formData.q14_visita_pre_anestesica_justificativa.trim()) return 'Justifique a ausência da visita pré-anestésica.';
+    }
+    if (stepNum === 3) {
+      if (!formData.q15_confirma_identificacao) return 'Responda se a equipe confirma a identificação antes de procedimentos.';
+      if (!formData.q16_SBAR) return 'Responda sobre o formulário de transição (SBAR).';
+      if (formData.q16_SBAR === 'Não' && !formData.q16_SBAR_justificativa.trim()) return 'Justifique sobre o formulário SBAR.';
+      if (!formData.q17_informado_riscos) return 'Responda se o paciente foi informado sobre a cirurgia e riscos.';
+      if (formData.q17_informado_riscos === 'Não' && !formData.q17_informado_riscos_justificativa.trim()) return 'Justifique informações sobre a cirurgia.';
+      if (!formData.q18_retirou_adornos) return 'Responda sobre a retirada de adornos/próteses.';
+      if (formData.q18_retirou_adornos === 'Não' && !formData.q18_retirou_adornos_justificativa.trim()) return 'Justifique a não retirada de adornos.';
+      if (!formData.q19_banho_clorexidina) return 'Responda sobre o banho com clorexidina degermante.';
+      if (formData.q19_banho_clorexidina === 'Não' && !formData.q19_banho_clorexidina_justificativa.trim()) return 'Justifique ausência do banho de clorexidina.';
+      if (!formData.q20_degermacao) return 'Responda sobre a 1ª degermação cirúrgica.';
+      if (!formData.q21_equipe_completa) return 'Responda se a equipe estava completa na sala.';
+      if (formData.q21_equipe_completa === 'Não' && !formData.q21_equipe_completa_justificativa.trim()) return 'Justifique ausência de membros da equipe.';
+      if (!formData.q22_sem_adorno) return 'Responda se a equipe estava sem adornos.';
+      if (formData.q22_sem_adorno === 'Não' && !formData.q22_sem_adorno_justificativa.trim()) return 'Justifique o uso de adornos pela equipe.';
+      if (!formData.q23_paramentada) return 'Responda se a equipe estava paramentada adequadamente.';
+    }
+    if (stepNum === 4) {
+      if (!formData.q24_checklist_inducao) return 'Responda sobre o checklist antes da indução (Sign In).';
+      if (formData.q24_checklist_inducao === 'Não' && !formData.q24_checklist_inducao_justificativa.trim()) return 'Justifique ausência do Sign In.';
+      if (!formData.q25_contagem_instrumentais_antes) return 'Responda sobre contagem de instrumentais antes da incisão.';
+      if (formData.q25_contagem_instrumentais_antes === 'Não' && !formData.q25_contagem_instrumentais_antes_justificativa.trim()) return 'Justifique a contagem de instrumentais antes.';
+      if (!formData.q26_antibiotico) return 'Responda sobre antibiótico profilático.';
+      if (formData.q26_antibiotico === 'Não' && !formData.q26_antibiotico_justificativa.trim()) return 'Justifique administração do antibiótico.';
+      if (!formData.q27_compressas_antes) return 'Responda sobre a conferência de compressas antes da incisão.';
+      if (!formData.q28_checklist_incisao) return 'Responda sobre o checklist antes da incisão (Time Out).';
+      if (formData.q28_checklist_incisao === 'Não' && !formData.q28_checklist_incisao_justificativa.trim()) return 'Justifique ausência do Time Out.';
+      if (!formData.q29_material_biologico) return 'Responda sobre a identificação de material biológico.';
+      if (formData.q29_material_biologico === 'Não' && !formData.q29_material_biologico_justificativa.trim()) return 'Justifique sobre o material biológico.';
+      if (!formData.q30_compressas_fechamento) return 'Responda sobre conferência de compressas antes do fechamento.';
+      if (formData.q30_compressas_fechamento === 'Não' && !formData.q30_compressas_fechamento_justificativa.trim()) return 'Justifique a conferência de compressas no fechamento.';
+      if (!formData.q31_instrumentais_fechamento) return 'Responda sobre conferência de instrumentais antes do fechamento.';
+      if (formData.q31_instrumentais_fechamento === 'Não' && !formData.q31_instrumentais_fechamento_justificativa.trim()) return 'Justifique a conferência de instrumentais no fechamento.';
+    }
+    if (stepNum === 5) {
+      if (!formData.q32_MORSE) return 'Responda sobre a escala de MORSE.';
+      if (formData.q32_MORSE === 'Não' && !formData.q32_MORSE_justificativa.trim()) return 'Justifique a falta da escala de MORSE.';
+      if (!formData.q33_dor) return 'Responda sobre a escala de dor no pós-operatório.';
+      if (formData.q33_dor === 'Não' && !formData.q33_dor_justificativa.trim()) return 'Justifique a falta de escala de dor.';
+      if (!formData.q34_sinais_vitais) return 'Responda sobre sinais vitais no pós-operatório.';
+      if (formData.q34_sinais_vitais === 'Não' && !formData.q34_sinais_vitais_justificativa.trim()) return 'Justifique registro de sinais vitais.';
+      if (!formData.q35_checklist_saida) return 'Responda sobre o checklist antes de sair da sala (Sign Out).';
+      if (formData.q35_checklist_saida === 'Não' && !formData.q35_checklist_saida_justificativa.trim()) return 'Justifique ausência do Sign Out.';
+      if (!formData.q36_equipamentos) return 'Responda sobre os equipamentos funcionantes e calibrados.';
+      if (formData.q36_equipamentos === 'Não' && !formData.q36_equipamentos_justificativa.trim()) return 'Justifique sobre os equipamentos.';
+      if (!formData.q37_RN_identificado) return 'Responda sobre a identificação do RN em sala.';
+      if (formData.q37_RN_identificado === 'Não' && !formData.q37_RN_identificado_justificativa.trim()) return 'Justifique sobre a identificação do RN.';
+      if (!formData.q38_vitamina_K) return 'Responda sobre a administração da vitamina K.';
+      if (formData.q38_vitamina_K === 'Não' && !formData.q38_vitamina_K_justificativa.trim()) return 'Justifique sobre a vitamina K.';
+      if (!formData.q39_SR) return 'Responda sobre o encaminhamento para a Sala de Recuperação.';
+      if (formData.q39_SR === 'Não' && !formData.q39_SR_justificativa.trim()) return 'Justifique sobre o encaminhamento para a SR.';
+    }
     return '';
   };
 
@@ -281,19 +352,33 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
     }
     setError('');
     setCurrentStep(prev => prev + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handlePrev = () => {
     setError('');
     setCurrentStep(prev => Math.max(1, prev - 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
-    const finalErr = validateStep(currentStep);
-    if (finalErr) {
-      setError(finalErr);
+
+    // Prevent submission if not on final step
+    if (currentStep !== 5) {
+      handleNext();
       return;
+    }
+
+    // Validate all steps from 1 to 5
+    for (let s = 1; s <= 5; s++) {
+      const stepErr = validateStep(s);
+      if (stepErr) {
+        setError(stepErr);
+        setCurrentStep(s);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -453,6 +538,21 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
         }
       }
 
+      // 3. Dispatch to destination Google Sheet Webhook if configured
+      try {
+        const { sendAuditToGoogleSheet } = await import('../../lib/googleSheetWebhook');
+        await sendAuditToGoogleSheet({
+          id: activeDocId,
+          tracerId: 'tracer_02',
+          type: 'T02',
+          rawData,
+          patientName,
+          unitName
+        });
+      } catch (sheetErr) {
+        console.warn('[SafeSurgeryForm] Google Sheet webhook notice:', sheetErr);
+      }
+
       window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
@@ -505,6 +605,7 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
           {steps.map((s) => (
             <button
               key={s.id}
+              type="button"
               disabled={submitting}
               onClick={() => {
                 if (s.id < currentStep) setCurrentStep(s.id);
@@ -550,7 +651,15 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
         </div>
 
         {/* Main Panel Form */}
-        <form onSubmit={handleSubmit} className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[460px] flex flex-col justify-between p-6 sm:p-8 space-y-6">
+        <form
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+              e.preventDefault();
+            }
+          }}
+          className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-h-[460px] flex flex-col justify-between p-6 sm:p-8 space-y-6"
+        >
           <div className="space-y-6">
             <AnimatePresence mode="wait">
               {/* STEP 1: IDENTIFICATION */}

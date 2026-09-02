@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, getDocs, writeBatch } from 'firebase/firestore';
-import { Database, RefreshCw, CloudDownload, Activity, Building2, CheckCircle2, Trash2 } from 'lucide-react';
+import { Database, RefreshCw, CloudDownload, Activity, Building2, CheckCircle2, Trash2, FileSpreadsheet, Settings } from 'lucide-react';
 import { HEALTH_UNITS } from '../lib/utils';
 import { useAuditsData } from '../context/DataContext';
+import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
+import { getAllWebhookUrls, getPendingQueue } from '../lib/googleSheetWebhook';
 
 const TRACER_CONFIGS = [
   { 
@@ -141,10 +143,41 @@ export default function DataManagement() {
     return lower === 'sim' || lower === 's' || lower === 'yes' || lower === 'conforme' || lower === 'true';
   };
 
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [webhookConfig, setWebhookConfig] = useState(getAllWebhookUrls());
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+
+  useEffect(() => {
+    setWebhookConfig(getAllWebhookUrls());
+    setPendingQueueCount(getPendingQueue().length);
+  }, [isWebhookModalOpen]);
+
   return (
     <div className="space-y-6">
+      {/* Destination Google Sheets Webhook Header Banner */}
+      <div className="bg-gradient-to-br from-emerald-900 to-teal-950 border border-emerald-800 rounded-2xl p-6 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-emerald-300 text-xs font-bold uppercase tracking-wider">
+            <FileSpreadsheet className="w-4 h-4" />
+            Planilhas Google Sheets de Destino
+          </div>
+          <h2 className="text-lg font-bold text-white">Gravação Automática das Coletas</h2>
+          <p className="text-xs text-emerald-100/80">
+            Cada coleta concluída nos formulários é transmitida em tempo real para a sua planilha Google Sheets.
+          </p>
+        </div>
+
+        <button
+          onClick={() => setIsWebhookModalOpen(true)}
+          className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 shrink-0"
+        >
+          <Settings className="w-4 h-4" />
+          Configurar Destino / Webhooks
+        </button>
+      </div>
+
       <header className="mb-2">
-        <h1 className="text-xl font-black text-slate-900 tracking-tight uppercase">Central de Sincronização de Tracers</h1>
+        <h1 className="text-xl font-black text-slate-900 tracking-tight uppercase">Central de Sincronização de Tracers (Origem CSV)</h1>
         <p className="text-slate-500 text-xs mt-1">Conecte os links oficiais das planilhas para monitoramento automático das equipes.</p>
       </header>
 
@@ -263,6 +296,11 @@ export default function DataManagement() {
           ))}
         </div>
       </div>
+      {/* Google Sheets Webhook Destination Modal */}
+      <GoogleSheetWebhookModal
+        isOpen={isWebhookModalOpen}
+        onClose={() => setIsWebhookModalOpen(false)}
+      />
     </div>
   );
 }

@@ -1,13 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { 
   collection, getDocs, 
   doc, writeBatch
 } from 'firebase/firestore';
-import { Settings, RefreshCw, ChevronDown, CheckCircle2, AlertCircle, Database, Trash2 } from 'lucide-react';
+import { Settings, RefreshCw, ChevronDown, CheckCircle2, AlertCircle, Database, Trash2, FileSpreadsheet, Send, ShieldCheck } from 'lucide-react';
 import { HEALTH_UNITS } from '../lib/utils';
 import { useAuditsData } from '../context/DataContext';
 import { motion } from 'motion/react';
+import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
+import { getAllWebhookUrls, getPendingQueue, flushPendingQueue } from '../lib/googleSheetWebhook';
 
 const TRACER_CONFIGS = [
   { 
@@ -147,8 +149,79 @@ export default function SchedulesSync() {
     return lower === 'sim' || lower === 's' || lower === 'yes' || lower === 'conforme' || lower === 'true';
   };
 
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [webhookConfig, setWebhookConfig] = useState(getAllWebhookUrls());
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+
+  useEffect(() => {
+    setWebhookConfig(getAllWebhookUrls());
+    setPendingQueueCount(getPendingQueue().length);
+  }, [isWebhookModalOpen]);
+
   return (
     <div className="space-y-6">
+      {/* Destination Google Sheets Webhook Card */}
+      <div className="bg-gradient-to-br from-emerald-900 to-teal-950 border border-emerald-800/80 rounded-2xl p-6 sm:p-8 text-white shadow-xl shadow-emerald-950/20 relative overflow-hidden">
+        <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+          <div className="space-y-2 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 border border-emerald-400/30 rounded-full text-emerald-300 text-xs font-bold tracking-wide">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              DESTINO DAS COLETAS EM TEMPO REAL
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+              Gravação Direta na Planilha Google Sheets
+            </h2>
+            <p className="text-xs sm:text-sm text-emerald-100/80 leading-relaxed">
+              Configure os Webhooks do Google Apps Script para que cada coleta lançada nos Tracers seja registrada instantaneamente como uma nova linha na sua planilha destino.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <div className="flex items-center gap-1.5 text-xs bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/10">
+                <span className={`w-2 h-2 rounded-full ${webhookConfig.tracer_01 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span className="text-slate-300 font-bold">Tracer 01:</span>
+                <span className={webhookConfig.tracer_01 ? 'text-emerald-300 font-medium' : 'text-slate-400 font-medium'}>
+                  {webhookConfig.tracer_01 ? 'Conectado' : 'Não configurado'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/10">
+                <span className={`w-2 h-2 rounded-full ${webhookConfig.tracer_02 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span className="text-slate-300 font-bold">Tracer 02:</span>
+                <span className={webhookConfig.tracer_02 ? 'text-emerald-300 font-medium' : 'text-slate-400 font-medium'}>
+                  {webhookConfig.tracer_02 ? 'Conectado' : 'Não configurado'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-xs bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-white/10">
+                <span className={`w-2 h-2 rounded-full ${webhookConfig.tracer_03 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span className="text-slate-300 font-bold">Tracer 03:</span>
+                <span className={webhookConfig.tracer_03 ? 'text-emerald-300 font-medium' : 'text-slate-400 font-medium'}>
+                  {webhookConfig.tracer_03 ? 'Conectado' : 'Não configurado'}
+                </span>
+              </div>
+
+              {pendingQueueCount > 0 && (
+                <div className="flex items-center gap-1.5 text-xs bg-amber-500/20 text-amber-300 border border-amber-400/30 px-3 py-1.5 rounded-lg font-bold">
+                  {pendingQueueCount} coletas pendentes de envio
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+            <button
+              onClick={() => setIsWebhookModalOpen(true)}
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-emerald-500/20 active:scale-95 whitespace-nowrap"
+            >
+              <Settings className="w-4 h-4" />
+              Configurar Planilhas Destino
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Header Info */}
       <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-6">
@@ -276,6 +349,11 @@ export default function SchedulesSync() {
           ))}
         </div>
       )}
+      {/* Google Sheets Webhook Destination Modal */}
+      <GoogleSheetWebhookModal
+        isOpen={isWebhookModalOpen}
+        onClose={() => setIsWebhookModalOpen(false)}
+      />
     </div>
   );
 }

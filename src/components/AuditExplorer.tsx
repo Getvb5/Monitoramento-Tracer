@@ -248,8 +248,8 @@ export default function AuditExplorer({
   const handleDeleteAudit = async (audit: any) => {
     if (!audit) return;
     try {
-      await deleteAudit(audit.id, audit.type);
-      triggerToast('Registro de auditoria excluído com sucesso!', 'success');
+      await deleteAudit(audit.id, audit.type, audit);
+      triggerToast('Registro de auditoria excluído do sistema e da planilha com sucesso!', 'success');
       setDeletingAudit(null);
     } catch (e: any) {
       console.error('Error deleting audit:', e);

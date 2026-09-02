@@ -21,7 +21,7 @@ export interface DataContextType {
   loading: boolean;
   isQuotaExceeded: boolean;
   refreshAudits: () => void;
-  deleteAudit: (id: string, type: string) => Promise<void>;
+  deleteAudit: (id: string, type: string, fullAuditData?: any) => Promise<void>;
   updateAudit: (id: string, type: string, data: any) => Promise<void>;
   saveAudit: (audit: any) => Promise<void>;
 }
@@ -176,7 +176,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [loadFromLocal, version]);
 
-  const deleteAudit = useCallback(async (id: string, type: string) => {
+  const deleteAudit = useCallback(async (id: string, type: string, fullAuditData?: any) => {
+    // 0. Locate existing audit details for full metadata matching
+    const existingAudit = fullAuditData || 
+      [...handAudits, ...patientAudits, ...surgeryAudits, ...getCustomLocalAudits()].find((a: any) => a.id === id);
+
     // 1. Delete locally immediately
     deleteAuditFromLocal(id);
     loadFromLocal();
@@ -188,7 +192,24 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e: any) {
       console.warn('[DataContext] Erro ao deletar no Firestore:', e?.message || e);
     }
-  }, [loadFromLocal]);
+
+    // 3. Dispatch deletion to Destination Google Sheets Webhook
+    try {
+      const { deleteAuditFromGoogleSheet } = await import('../lib/googleSheetWebhook');
+      const tracerId = type === 'T01' ? 'tracer_01' : type === 'T02' ? 'tracer_02' : 'tracer_03';
+      await deleteAuditFromGoogleSheet({
+        id,
+        tracerId,
+        type,
+        patientName: existingAudit?.patientName || existingAudit?.rawData?.['Nome do Paciente'] || existingAudit?.rawData?.['q4_paciente'] || '',
+        unitName: existingAudit?.unitName || existingAudit?.unitId || existingAudit?.rawData?.['Unidade de Saúde'] || '',
+        timestamp: existingAudit?.timestampStr || existingAudit?.timestamp || existingAudit?.rawData?.['Carimbo de data/hora'] || '',
+        rawData: existingAudit?.rawData || {}
+      });
+    } catch (sheetErr) {
+      console.warn('[DataContext] Erro ao excluir na planilha destino:', sheetErr);
+    }
+  }, [loadFromLocal, handAudits, patientAudits, surgeryAudits]);
 
   const updateAudit = useCallback(async (id: string, type: string, data: any) => {
     // 1. Update locally immediately
