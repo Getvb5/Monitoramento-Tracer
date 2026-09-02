@@ -380,11 +380,13 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
     }
     setError('');
     setCurrentStep(prev => prev + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBack = () => {
     setError('');
     setCurrentStep(prev => prev - 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async (e: any) => {
@@ -826,7 +828,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
 
               {/* STEP 4: PRESCRIÇÃO E TRATAMENTO */}
               {currentStep === 4 && (
-                <div className="space-y-5 max-h-[500px] overflow-y-auto pr-2">
+                <div className="space-y-5">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
                       Section 04 - Prescrição e Tratamento Seguro
@@ -859,7 +861,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
 
               {/* STEP 5: ESTOCAGEM E AMBIENTE */}
               {currentStep === 5 && (
-                <div className="space-y-5 max-h-[500px] overflow-y-auto pr-2">
+                <div className="space-y-5">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-xs font-black uppercase text-slate-800 tracking-wider">
                       Section 05 - Administração Avançada, Armazenamento e Setor
