@@ -1,8 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { HEALTH_UNITS } from '../lib/utils';
-import { collection, query, onSnapshot, orderBy, limit } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { FALLBACK_HAND_AUDITS, FALLBACK_PATIENT_AUDITS, FALLBACK_SURGERY_AUDITS, getMergedHandAudits, getMergedPatientAudits, getMergedSurgeryAudits, getDeletedAuditIds, deduplicateAudits } from '../lib/fallbackData';
+import { useData } from '../context/DataContext';
 import { 
   Building2, ChevronRight, Search, 
   Target, AlertCircle, CheckCircle2, 
@@ -14,21 +12,6 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
-
-interface Audit {
-  id: string;
-  unitId: string;
-  type?: string;
-  hasWristband?: boolean;
-  wristbandLegible?: boolean;
-  correctData?: boolean;
-  signIIn?: boolean;
-  timeOut?: boolean;
-  signOut?: boolean;
-  compliant?: boolean;
-  timestamp?: any;
-  tracerName?: string;
-}
 
 interface UnitExplorerProps {
   isAdmin?: boolean;
@@ -46,158 +29,7 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
     }
   }, [isAdmin, userUnit]);
   
-  const [handAudits, setHandAudits] = React.useState<Audit[]>([]);
-  const [patientAudits, setPatientAudits] = React.useState<Audit[]>([]);
-  const [surgeryAudits, setSurgeryAudits] = React.useState<Audit[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [refreshTrigger, setRefreshTrigger] = React.useState(0);
-
-  React.useEffect(() => {
-    const handleRefresh = () => {
-      setRefreshTrigger(prev => prev + 1);
-    };
-    window.addEventListener('local-data-updated', handleRefresh);
-    return () => {
-      window.removeEventListener('local-data-updated', handleRefresh);
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-      setHandAudits(getMergedHandAudits());
-      setPatientAudits(getMergedPatientAudits());
-      setSurgeryAudits(getMergedSurgeryAudits());
-      setLoading(false);
-      return;
-    }
-
-    const qHand = query(collection(db, 'audits_hand_hygiene'));
-    const qPatient = query(collection(db, 'audits_patient_id'));
-    const qSurgery = query(collection(db, 'audits_safe_surgery'));
-
-    let loadedHand = false;
-    let loadedPatient = false;
-    let loadedSurgery = false;
-
-    const checkLoading = () => {
-      if (loadedHand && loadedPatient && loadedSurgery) {
-        setLoading(false);
-      }
-    };
-
-    let unsubHand: () => void = () => {};
-    let unsubPatient: () => void = () => {};
-    let unsubSurgery: () => void = () => {};
-
-    const handleQuotaFailure = () => {
-      localStorage.setItem('firestore_quota_exceeded', 'true');
-      window.dispatchEvent(new Event('firestore-quota-exceeded'));
-      setHandAudits(getMergedHandAudits());
-      setPatientAudits(getMergedPatientAudits());
-      setSurgeryAudits(getMergedSurgeryAudits());
-      setLoading(false);
-      try { unsubHand(); } catch (e) {}
-      try { unsubPatient(); } catch (e) {}
-      try { unsubSurgery(); } catch (e) {}
-    };
-
-    unsubHand = onSnapshot(qHand, (s) => {
-      const deletedIds = getDeletedAuditIds();
-      const firestoreDocs = s.docs
-        .map(d => ({ id: d.id, ...d.data(), type: 'T03' }))
-        .filter(d => !deletedIds.includes(d.id));
-      const localList = getMergedHandAudits();
-      const combined = deduplicateAudits([...localList, ...firestoreDocs]);
-      setHandAudits(combined);
-      loadedHand = true;
-      checkLoading();
-    }, (err) => {
-      if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-        handleQuotaFailure();
-      } else {
-        console.warn("[UnitExplorer] Falha ao carregar T03 do Firestore, usando dados locais:", err?.message || err);
-        const fallbackList = getMergedHandAudits();
-        const hasRealAudits = fallbackList.some(a => !a.id.startsWith('f_'));
-        setHandAudits(hasRealAudits ? fallbackList.filter(a => !a.id.startsWith('f_')) : fallbackList);
-        loadedHand = true;
-        checkLoading();
-      }
-    });
-
-    unsubPatient = onSnapshot(qPatient, (s) => {
-      const deletedIds = getDeletedAuditIds();
-      const firestoreDocs = s.docs
-        .map(d => ({ id: d.id, ...d.data(), type: 'T01' }))
-        .filter(d => !deletedIds.includes(d.id));
-      const localList = getMergedPatientAudits();
-      const combined = deduplicateAudits([...localList, ...firestoreDocs]);
-      setPatientAudits(combined);
-      loadedPatient = true;
-      checkLoading();
-    }, (err) => {
-      if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-        handleQuotaFailure();
-      } else {
-        console.warn("[UnitExplorer] Falha ao carregar T01 do Firestore, usando dados locais:", err?.message || err);
-        const fallbackList = getMergedPatientAudits();
-        const hasRealAudits = fallbackList.some(a => !a.id.startsWith('f_'));
-        setPatientAudits(hasRealAudits ? fallbackList.filter(a => !a.id.startsWith('f_')) : fallbackList);
-        loadedPatient = true;
-        checkLoading();
-      }
-    });
-
-    unsubSurgery = onSnapshot(qSurgery, (s) => {
-      const deletedIds = getDeletedAuditIds();
-      const firestoreDocs = s.docs
-        .map(d => ({ id: d.id, ...d.data(), type: 'T02' }))
-        .filter(d => !deletedIds.includes(d.id));
-      const localList = getMergedSurgeryAudits();
-      const combined = deduplicateAudits([...localList, ...firestoreDocs]);
-      setSurgeryAudits(combined);
-      loadedSurgery = true;
-      checkLoading();
-    }, (err) => {
-      if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-        handleQuotaFailure();
-      } else {
-        console.warn("[UnitExplorer] Falha ao carregar T02 do Firestore, usando dados locais:", err?.message || err);
-        const fallbackList = getMergedSurgeryAudits();
-        const hasRealAudits = fallbackList.some(a => !a.id.startsWith('f_'));
-        setSurgeryAudits(hasRealAudits ? fallbackList.filter(a => !a.id.startsWith('f_')) : fallbackList);
-        loadedSurgery = true;
-        checkLoading();
-      }
-    });
-
-    // Global quota event
-    const handleGlobalQuota = () => {
-      setHandAudits(getMergedHandAudits());
-      setPatientAudits(getMergedPatientAudits());
-      setSurgeryAudits(getMergedSurgeryAudits());
-      setLoading(false);
-      try { unsubHand(); } catch (e) {}
-      try { unsubPatient(); } catch (e) {}
-      try { unsubSurgery(); } catch (e) {}
-    };
-    window.addEventListener('firestore-quota-exceeded', handleGlobalQuota);
-
-    // Seguranca contra lentidao ou offline: max 3 segundos
-    const loadingTimer = setTimeout(() => {
-      setLoading(false);
-      if (!loadedHand) setHandAudits(getMergedHandAudits());
-      if (!loadedPatient) setPatientAudits(getMergedPatientAudits());
-      if (!loadedSurgery) setSurgeryAudits(getMergedSurgeryAudits());
-    }, 3000);
-
-    return () => { 
-      try { unsubHand(); } catch (e) {}
-      try { unsubPatient(); } catch (e) {}
-      try { unsubSurgery(); } catch (e) {}
-      window.removeEventListener('firestore-quota-exceeded', handleGlobalQuota);
-      clearTimeout(loadingTimer); 
-    };
-  }, [refreshTrigger]);
+  const { handAudits, patientAudits, surgeryAudits, loading } = useData();
 
   const filteredUnits = useMemo(() => {
     let list = HEALTH_UNITS;
@@ -233,7 +65,11 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
       t02: { count: s.length },
       t03: { count: h.length },
       total: p.length + s.length + h.length,
-      history: [...p, ...s, ...h].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0))
+      history: [...p, ...s, ...h].sort((a, b) => {
+        const timeA = new Date(a.timestampStr || (a.timestamp?.toDate ? a.timestamp.toDate() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : 0))).getTime();
+        const timeB = new Date(b.timestampStr || (b.timestamp?.toDate ? b.timestamp.toDate() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : 0))).getTime();
+        return timeB - timeA;
+      })
     };
   }, [selectedUnitId, patientAudits, surgeryAudits, handAudits]);
 
@@ -399,8 +235,11 @@ export default function UnitExplorer({ isAdmin = true, userUnit = null }: UnitEx
                         <tbody className="divide-y divide-slate-50">
                           {unitData?.history.slice(0, 15).map(audit => {
                              const getAuditDate = () => {
-                               if (!audit.timestamp) return new Date();
-                               return audit.timestamp.toDate ? audit.timestamp.toDate() : new Date(audit.timestamp);
+                               if (audit.timestampStr) return new Date(audit.timestampStr);
+                               if (audit.timestamp?.toDate) return audit.timestamp.toDate();
+                               if (audit.timestamp?.seconds) return new Date(audit.timestamp.seconds * 1000);
+                               if (audit.timestamp) return new Date(audit.timestamp);
+                               return new Date();
                              };
                              const auditDate = getAuditDate();
                              return (

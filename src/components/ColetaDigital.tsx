@@ -53,7 +53,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   const [activeTracer, setActiveTracer] = useState<string | null>(null);
   const [editingAudit, setEditingAudit] = useState<any | null>(null);
   const [auditSuccess, setAuditSuccess] = useState(false);
-  const [auditScopeTab, setAuditScopeTab] = useState<'my' | 'unit' | 'all'>('my');
+  const [auditScopeTab, setAuditScopeTab] = useState<'my' | 'unit' | 'all'>('all');
   const [recentAudits, setRecentAudits] = useState<{
     my: any[];
     unit: any[];
@@ -190,23 +190,19 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       // Set initial view with local data
       organizeAndSet(allLocal);
 
-      // 2. Fetch the latest from Firestore asynchronously (non-blocking) if quota is not exceeded
-      if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-        return;
-      }
-
+      // 2. Fetch the latest from Firestore asynchronously (non-blocking)
       try {
-        const { getDocs, collection, query, where, limit } = await import('firebase/firestore');
+        const { getDocs, collection, query, limit } = await import('firebase/firestore');
         const { db } = await import('../lib/firebase');
 
         const fetchCollection = async (collName: string, type: 'T01' | 'T02' | 'T03', tracerName: string) => {
-          const q = query(collection(db, collName), limit(150));
+          const q = query(collection(db, collName), limit(300));
           const snapshot = await getDocs(q);
           return snapshot.docs.map(doc => {
             const data = doc.data();
             const dateStr = data.timestamp && typeof data.timestamp.toDate === 'function'
               ? data.timestamp.toDate().toISOString() 
-              : (data.timestampStr || new Date().toISOString());
+              : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : (data.timestampStr || new Date().toISOString()));
             return {
               id: doc.id,
               type,
@@ -225,7 +221,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
         const allFirestore = [...pAudits, ...sAudits, ...hAudits];
         
-        // Merge with local deduplicated
+        // Merge with local deduplicated, prioritizing cloud/latest
         const mergedMap = new Map();
         allLocal.forEach(a => mergedMap.set(a.id, a));
         allFirestore.forEach(a => {
@@ -236,11 +232,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
         organizeAndSet(Array.from(mergedMap.values()));
       } catch (firestoreErr: any) {
-        if (firestoreErr?.message && (firestoreErr.message.includes('Quota') || firestoreErr.message.includes('resource-exhausted') || firestoreErr.message.includes('quota') || firestoreErr.message.includes('limit'))) {
-          localStorage.setItem('firestore_quota_exceeded', 'true');
-          window.dispatchEvent(new Event('firestore-quota-exceeded'));
-        }
-        console.warn('Usando coletas locais na Coleta Digital:', firestoreErr?.message || firestoreErr);
+        console.warn('Coleta Digital carregou dados locais:', firestoreErr?.message || firestoreErr);
       }
     } catch (e) {
       console.error('Error loading recent audits:', e);
@@ -291,6 +283,13 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
   useEffect(() => {
     loadRecentAudits();
+    const handleUpdate = () => loadRecentAudits();
+    window.addEventListener('local-data-updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('local-data-updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
   }, [user, activeTracer, auditSuccess]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {

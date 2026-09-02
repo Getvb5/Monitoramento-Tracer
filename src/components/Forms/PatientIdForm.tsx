@@ -380,7 +380,10 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
       const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
       const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
 
-      const auditorName = formData.q6_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const auditorName = formData.q5_auditor || formData.q6_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const patientName = formData.q6_paciente || '';
+      const medicalRecordNumber = formData.q7_prontuario || '-';
+      const sector = formData.q4_setor || '-';
 
       // 1. Immediately persist locally (instantaneous - zero lag)
       try {
@@ -388,15 +391,19 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
         saveCustomLocalAudit({
           id: activeDocId,
           unitId,
+          unitName,
           auditorId: user.uid,
           auditorName,
+          patientName,
+          medicalRecordNumber,
+          sector,
           tracerNumber: '01',
           tracerName: 'Beira Leito',
           type: 'T01',
           ...scorePayload,
           rawData,
           sourceRowHash: JSON.stringify(rawData),
-          timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
+          timestampStr: editingAudit?.timestampStr || dateObj.toISOString(),
           competencia: dynamicCompetencia
         });
       } catch (saveLocalErr) {
@@ -405,42 +412,42 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
       // 2. Synchronize to Firestore with real network sync
       try {
-        if (localStorage.getItem('firestore_quota_exceeded') !== 'true') {
-          const { doc, setDoc } = await import('firebase/firestore');
-          await Promise.race([
-            setDoc(doc(db, 'audits_patient_id', activeDocId), {
-              unitId,
-              auditorId: user.uid,
-              auditorName,
-              type: 'T01',
-              competencia: dynamicCompetencia,
-              timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-              ...scorePayload,
-              rawData,
-              sourceRowHash: JSON.stringify(rawData),
-              tracerNumber: '01',
-              tracerName: 'Beira Leito',
-              timestamp: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }, { merge: true }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-          ]);
-        }
+        const { doc, setDoc } = await import('firebase/firestore');
+        await Promise.race([
+          setDoc(doc(db, 'audits_patient_id', activeDocId), {
+            unitId,
+            unitName,
+            auditorId: user.uid,
+            auditorName,
+            patientName,
+            medicalRecordNumber,
+            sector,
+            type: 'T01',
+            competencia: dynamicCompetencia,
+            timestampStr: editingAudit?.timestampStr || dateObj.toISOString(),
+            ...scorePayload,
+            rawData,
+            sourceRowHash: JSON.stringify(rawData),
+            tracerNumber: '01',
+            tracerName: 'Beira Leito',
+            timestamp: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
       } catch (syncErr: any) {
         if (syncErr?.message === 'timeout') {
           console.warn('[PatientIdForm] Firestore sync timed out (persisted locally).');
         } else {
           console.warn('[PatientIdForm] Firestore save notice:', syncErr?.message || syncErr);
-          if (syncErr?.message && (syncErr.message.includes('Quota') || syncErr.message.includes('resource-exhausted'))) {
-            localStorage.setItem('firestore_quota_exceeded', 'true');
-            window.dispatchEvent(new Event('firestore-quota-exceeded'));
-          }
         }
       }
 
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
       console.error('Error in save:', err);
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } finally {
       setSubmitting(false);

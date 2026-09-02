@@ -303,8 +303,7 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
     replaceSyncedLocalAudits(targetType, tracerId, localRecordsToSave);
 
     // Persist to Firestore asynchronously using batches (up to 400 docs per batch)
-    const isQuotaExceeded = localStorage.getItem('firestore_quota_exceeded') === 'true';
-    if (!isQuotaExceeded && localRecordsToSave.length > 0) {
+    if (localRecordsToSave.length > 0) {
       try {
         const chunkSize = 400;
         const batchPromises: Promise<any>[] = [];
@@ -320,10 +319,6 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
         await Promise.all(batchPromises);
       } catch (err: any) {
         console.warn(`[AutoSync] Batch write to Firestore for ${tracerId} notice:`, err?.message || err);
-        if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-          localStorage.setItem('firestore_quota_exceeded', 'true');
-          window.dispatchEvent(new Event('firestore-quota-exceeded'));
-        }
       }
     }
 

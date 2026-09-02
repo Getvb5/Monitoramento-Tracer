@@ -63,26 +63,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-      setIsQuotaExceeded(true);
-      import('firebase/firestore').then(({ disableNetwork }) => {
-        disableNetwork(db).catch((e) => {
-          console.error("Erro ao desativar rede no início após cota excedida:", e);
-        });
-      });
-    }
-    const handleQuota = () => {
-      setIsQuotaExceeded(true);
-      import('firebase/firestore').then(({ disableNetwork }) => {
-        disableNetwork(db).catch((e) => {
-          console.error("Erro ao desativar rede após cota excedida:", e);
-        });
-      });
-    };
-    window.addEventListener('firestore-quota-exceeded', handleQuota);
-    return () => {
-      window.removeEventListener('firestore-quota-exceeded', handleQuota);
-    };
+    // Ensure online network connectivity is maintained
+    try {
+      localStorage.removeItem('firestore_quota_exceeded');
+    } catch (_) {}
   }, []);
 
   const [checkingConnection, setCheckingConnection] = useState(false);
@@ -386,13 +370,6 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [user]);
-
-  // Auto-initialize globalUnit to userUnit if empty upon login, but allow freedom to change or clear
-  useEffect(() => {
-    if (!isAdmin && userUnit && globalUnit === '') {
-      setGlobalUnit(userUnit);
-    }
-  }, [isAdmin, userUnit]);
 
   // Information Architecture Metadata & Breadcrumbs
   const viewMetadata: Record<View, { section: string; title: string; subtitle: string }> = {
@@ -1612,25 +1589,7 @@ export default function App() {
               {view === 'schedules' && <SchedulesSync />}
               {view === 'data_mgmt' && <DataManagement />}
               {view === 'coleta' && (
-                !isAdmin ? (
-                  <ColetaDigital user={user} isAdmin={isAdmin} userUnit={userUnit} />
-                ) : (
-                  <div className="max-w-xl mx-auto py-12 px-6 text-center space-y-4">
-                    <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto border border-amber-200">
-                      <ShieldCheck className="w-7 h-7" />
-                    </div>
-                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Acesso Reservado ao Perfil Auditor</h2>
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      O perfil <strong>Administrador</strong> tem foco em monitoramento, análise de indicadores e gestão do sistema. Para iniciar coletas e aplicar checklists de tracers em campo, alterne seu perfil para <strong>Auditor</strong> no menu de usuário no topo da tela.
-                    </p>
-                    <button
-                      onClick={() => handleToggleProfile('AUDITOR')}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black uppercase tracking-wider transition-colors shadow-sm"
-                    >
-                      Mudar para Perfil Auditor
-                    </button>
-                  </div>
-                )
+                <ColetaDigital user={user} isAdmin={isAdmin} userUnit={userUnit} />
               )}
               {view === 'explorer' && (
                 <AuditExplorer 

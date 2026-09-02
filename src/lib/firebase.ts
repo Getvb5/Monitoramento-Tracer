@@ -4,7 +4,7 @@ import {
   initializeFirestore, 
   persistentLocalCache, 
   persistentMultipleTabManager,
-  disableNetwork,
+  enableNetwork,
   setLogLevel
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
@@ -16,12 +16,19 @@ const app = initializeApp(firebaseConfig);
 const firestoreDbId = (firebaseConfig as any).firestoreDatabaseId || "ai-studio-c51bd8fd-66f7-46cc-a3dd-9c9faf83ced0";
 
 // Initialize Firestore with robust multi-tab IndexedDB cache
-// This prevents reading from the server on page reloads and tab navigation, saving quota!
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager()
   })
 }, firestoreDbId);
+
+// Ensure online connection is always active
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('firestore_quota_exceeded');
+    enableNetwork(db).catch(() => {});
+  } catch (e) {}
+}
 
 export const auth = getAuth(app);
 
@@ -114,24 +121,6 @@ export const requestGoogleDocsAccess = async () => {
   }
   return { result, accessToken: credential?.accessToken };
 };
-
-// If quota is already marked as exceeded, proactively disable the network
-// to prevent Firestore SDK background retries and console/network noise.
-if (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true') {
-  console.log("[Firebase] Local storage quota limit flag is active. Disabling network on startup.");
-  disableNetwork(db).catch((e) => {
-    console.error("[Firebase] Error disabling network on startup:", e);
-  });
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('firestore-quota-exceeded', () => {
-    console.log("[Firebase] Runtime quota limit exceeded. Disabling Firestore network to prevent retries.");
-    disableNetwork(db).catch((e) => {
-      console.error("[Firebase] Error disabling network on quota exceeded:", e);
-    });
-  });
-}
 
 export const logout = () => signOut(auth);
 

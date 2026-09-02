@@ -399,10 +399,6 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
     setError('');
 
     try {
-      if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-        throw new Error('quota-exceeded');
-      }
-
       // Format unit and construct final rawData dictionary matching utility arrays
       const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
       const rawData: Record<string, string> = {
@@ -482,7 +478,10 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
       const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
       const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
 
-      const auditorName = formData.q5_nome_auditor || formData.q6_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const auditorName = formData.q5_auditor || formData.q5_nome_auditor || formData.q6_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const patientName = formData.q6_paciente || '';
+      const medicalRecordNumber = formData.q7_prontuario || '-';
+      const sector = formData.q4_setor || '-';
 
       // 1. Immediately persist locally
       try {
@@ -490,8 +489,12 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
         saveCustomLocalAudit({
           id: activeDocId,
           unitId,
+          unitName,
           auditorId: user.uid,
           auditorName,
+          patientName,
+          medicalRecordNumber,
+          sector,
           compliant: compliantBool,
           rawData,
           sourceRowHash: JSON.stringify(rawData),
@@ -499,7 +502,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
           tracerName: 'Processos Seguros de Medicação',
           type: 'T03',
           competencia: dynamicCompetencia,
-          timestampStr: editingAudit?.timestampStr || new Date().toISOString()
+          timestampStr: editingAudit?.timestampStr || dateObj.toISOString()
         });
       } catch (saveLocalErr) {
         console.error("Local shadow save failed", saveLocalErr);
@@ -507,42 +510,42 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
 
       // 2. Synchronize to Firestore with real network sync
       try {
-        if (localStorage.getItem('firestore_quota_exceeded') !== 'true') {
-          const { doc, setDoc } = await import('firebase/firestore');
-          await Promise.race([
-            setDoc(doc(db, 'audits_hand_hygiene', activeDocId), {
-              unitId,
-              auditorId: user.uid,
-              auditorName,
-              compliant: compliantBool,
-              rawData,
-              sourceRowHash: JSON.stringify(rawData),
-              tracerNumber: '03',
-              tracerName: 'Processos Seguros de Medicação',
-              type: 'T03',
-              competencia: dynamicCompetencia,
-              timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-              timestamp: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }, { merge: true }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-          ]);
-        }
+        const { doc, setDoc } = await import('firebase/firestore');
+        await Promise.race([
+          setDoc(doc(db, 'audits_hand_hygiene', activeDocId), {
+            unitId,
+            unitName,
+            auditorId: user.uid,
+            auditorName,
+            patientName,
+            medicalRecordNumber,
+            sector,
+            compliant: compliantBool,
+            rawData,
+            sourceRowHash: JSON.stringify(rawData),
+            tracerNumber: '03',
+            tracerName: 'Processos Seguros de Medicação',
+            type: 'T03',
+            competencia: dynamicCompetencia,
+            timestampStr: editingAudit?.timestampStr || dateObj.toISOString(),
+            timestamp: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
       } catch (syncErr: any) {
         if (syncErr?.message === 'timeout') {
           console.warn('[HandHygieneForm] Firestore sync timed out (persisted locally).');
         } else {
           console.warn('[HandHygieneForm] Firestore save notice:', syncErr?.message || syncErr);
-          if (syncErr?.message && (syncErr.message.includes('Quota') || syncErr.message.includes('resource-exhausted'))) {
-            localStorage.setItem('firestore_quota_exceeded', 'true');
-            window.dispatchEvent(new Event('firestore-quota-exceeded'));
-          }
         }
       }
 
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
       console.error('Error in save:', err);
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } finally {
       setSubmitting(false);

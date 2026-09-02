@@ -24,55 +24,107 @@ let inMemoryAudits: LocalAudit[] | null = null;
 
 export function getAuditFingerprint(a: any): string {
   if (!a) return '';
-  const type = (a.type || a.tracerNumber || '').toString().trim().toUpperCase();
-  const unit = (a.unitId || a.hospitalId || a.unidadeId || a.unitName || '').toString().trim().toLowerCase();
+
+  const normalizeStr = (val: any) => {
+    if (val === undefined || val === null) return '';
+    return String(val).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  };
+
+  const rawType = (a.type || a.tracerNumber || '').toString().trim().toUpperCase().replace(/^TRACER\s*/, 'T');
+  const type = rawType.includes('01') || rawType === 'T01' ? 'T01' : rawType.includes('02') || rawType === 'T02' ? 'T02' : rawType.includes('03') || rawType === 'T03' ? 'T03' : rawType;
+  
+  const unit = normalizeStr(a.unitId || a.hospitalId || a.unidadeId || a.unitName || '');
   const raw = a.rawData || (a.sourceRowHash ? (typeof a.sourceRowHash === 'object' ? a.sourceRowHash : (typeof a.sourceRowHash === 'string' ? (() => { try { return JSON.parse(a.sourceRowHash); } catch { return {}; } })() : {})) : {});
   
-  const carimbo = (raw['Carimbo de data/hora'] || raw['CARIMBO DE DATA/HORA'] || raw['Data do Tracer:'] || raw['03- Data do Tracer:'] || a.timestampStr || '').toString().trim();
-  const patient = (a.patientName || raw['Nome Completo do Paciente:'] || raw['Nome Completo do Paciente'] || '').toString().trim().toLowerCase();
-  const mrn = (a.medicalRecordNumber || raw['Nº do Prontuário do Paciente:'] || raw['Nº do Prontuário do Paciente'] || '').toString().trim();
-  const auditor = (a.auditorName || raw['Nome Completo do Auditor:'] || raw['Nome Completo do Auditor'] || '').toString().trim().toLowerCase();
-  const sector = (a.sector || raw['Setor Auditado:'] || raw['Setor Auditado'] || '').toString().trim().toLowerCase();
+  const carimbo = normalizeStr(
+    raw['Carimbo de data/hora'] || raw['CARIMBO DE DATA/HORA'] || raw['Data do Tracer:'] || raw['03- Data do Tracer:'] || raw['Data da Coleta:'] || a.timestampStr || ''
+  ).split('t')[0].split(' ')[0];
 
-  if (carimbo && (patient || mrn)) {
-    return `${type}__${unit}__${carimbo}__${patient}__${mrn}`;
-  }
-  if (patient && mrn && mrn !== '-') {
+  const patient = normalizeStr(
+    a.patientName || raw['Nome Completo do Paciente:'] || raw['Nome Completo do Paciente'] || raw['07- Nome do paciente:'] || raw['07- Nome Completo do Paciente:'] || raw['07- Nome da paciente:'] || raw['Nome Completo da Paciente:'] || raw['Nome do paciente:'] || raw['Paciente:'] || raw['Paciente'] || ''
+  );
+
+  const mrn = normalizeStr(
+    a.medicalRecordNumber || raw['Nº do Prontuário do Paciente:'] || raw['Nº do Prontuário do Paciente'] || raw['08- Nº do Prontuário do Paciente:'] || raw['Nº do Prontuário da Paciente:'] || raw['08- Nº do Prontuário da Paciente:'] || raw['Prontuário:'] || raw['Prontuário'] || ''
+  );
+
+  const auditor = normalizeStr(
+    a.auditorName || raw['Nome Completo do Auditor:'] || raw['Nome Completo do Auditor'] || raw['06- Nome Completo do Auditor:'] || raw['05- Nome Completo do Auditor:'] || raw['Auditor'] || ''
+  );
+
+  const sector = normalizeStr(
+    a.sector || raw['Setor Auditado:'] || raw['Setor Auditado'] || raw['05- Setor Auditado:'] || raw['04- Setor Auditado:'] || raw['Setor:'] || raw['Setor'] || ''
+  );
+
+  // 1. Exact match on patient and medical record number
+  if (patient && patient !== '-' && mrn && mrn !== '-') {
     return `${type}__${unit}__${patient}__${mrn}`;
   }
-  if (carimbo) {
-    return `${type}__${unit}__${carimbo}__${auditor}`;
+
+  // 2. Match on patient and date
+  if (patient && patient !== '-' && carimbo && carimbo !== '-') {
+    return `${type}__${unit}__${carimbo}__${patient}`;
   }
-  if (patient) {
+
+  // 3. Match on MRN and date
+  if (mrn && mrn !== '-' && carimbo && carimbo !== '-') {
+    return `${type}__${unit}__${carimbo}__${mrn}`;
+  }
+
+  // 4. Match on patient and auditor/sector
+  if (patient && patient !== '-' && auditor && sector) {
     return `${type}__${unit}__${patient}__${auditor}__${sector}`;
   }
-  return a.id ? `${type}__${a.id}` : Math.random().toString();
+
+  // 5. Match on date, auditor and sector (standard for medication / hand hygiene audits)
+  if (carimbo && carimbo !== '-' && auditor && auditor !== '-' && sector && sector !== '-') {
+    return `${type}__${unit}__${carimbo}__${auditor}__${sector}`;
+  }
+
+  // 6. Direct ID fallback
+  return a.id ? `${type}__${unit}__id_${a.id}` : Math.random().toString();
 }
 
 export function deduplicateAudits(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const deletedIds = getDeletedAuditIds();
+  const idMap = new Map<string, any>();
   const fpMap = new Map<string, any>();
 
   for (const item of list) {
     if (!item || !item.id || item.id.startsWith('f_') || deletedIds.includes(item.id)) {
       continue;
     }
+
     const fp = getAuditFingerprint(item);
     
-    if (fpMap.has(fp)) {
-      const existing = fpMap.get(fp);
-      // Prefer record that has richer rawData or is user-created or updated
+    // Check if we already have this record by ID or by Fingerprint
+    let existing = idMap.get(item.id) || fpMap.get(fp);
+
+    if (existing) {
       const existingRawKeys = existing.rawData ? Object.keys(existing.rawData).length : 0;
       const itemRawKeys = item.rawData ? Object.keys(item.rawData).length : 0;
-      if (itemRawKeys > existingRawKeys) {
-        fpMap.set(fp, item);
-      } else if (!existing.externalSource && item.externalSource) {
-        // keep user-created
+      
+      // Determine which version to keep: prefer user-created or record with richer data
+      let keepItem = false;
+      if (!item.externalSource && existing.externalSource) {
+        keepItem = true;
+      } else if (item.externalSource && !existing.externalSource) {
+        keepItem = false;
+      } else if (itemRawKeys > existingRawKeys) {
+        keepItem = true;
       } else if (item.updatedAt && (!existing.updatedAt || item.updatedAt > existing.updatedAt)) {
-        fpMap.set(fp, item);
+        keepItem = true;
       }
+
+      const winner = keepItem ? item : existing;
+      idMap.set(item.id, winner);
+      if (existing.id && existing.id !== item.id) {
+        idMap.delete(existing.id);
+      }
+      fpMap.set(fp, winner);
     } else {
+      idMap.set(item.id, item);
       fpMap.set(fp, item);
     }
   }

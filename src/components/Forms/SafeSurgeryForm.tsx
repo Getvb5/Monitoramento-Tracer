@@ -384,16 +384,16 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
     };
 
     try {
-      if (localStorage.getItem('firestore_quota_exceeded') === 'true') {
-        throw new Error('quota-exceeded');
-      }
-
       const activeDocId = editingAudit?.id || ('aud_s_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
 
       const dateObj = formData.q2_data ? new Date(formData.q2_data + 'T12:00:00') : new Date();
       const dynamicCompetencia = editingAudit?.competencia || `${new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(dateObj).replace('.', '')}/${dateObj.getFullYear()}`;
 
-      const auditorName = formData.q6_nome_auditor || formData.q5_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
+      const auditorName = formData.q4_auditor || formData.q6_nome_auditor || formData.q5_nome_auditor || user.displayName || user.email || 'Auditor de Campo';
+      const patientName = formData.q5_paciente || '';
+      const medicalRecordNumber = formData.q6_prontuario || '-';
+      const sector = formData.q7_procedimento || 'Centro Cirúrgico / Maternidade';
 
       // 1. Immediately persist locally
       try {
@@ -401,15 +401,19 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
         saveCustomLocalAudit({
           id: activeDocId,
           unitId,
+          unitName,
           auditorId: user.uid,
           auditorName,
+          patientName,
+          medicalRecordNumber,
+          sector,
           tracerNumber: '02',
           tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
           type: 'T02',
           ...scorePayload,
           rawData,
           sourceRowHash: JSON.stringify(rawData),
-          timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
+          timestampStr: editingAudit?.timestampStr || dateObj.toISOString(),
           competencia: dynamicCompetencia
         });
       } catch (saveLocalErr) {
@@ -418,42 +422,42 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
 
       // 2. Synchronize to Firestore with real network sync
       try {
-        if (localStorage.getItem('firestore_quota_exceeded') !== 'true') {
-          const { doc, setDoc } = await import('firebase/firestore');
-          await Promise.race([
-            setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
-              unitId,
-              auditorId: user.uid,
-              auditorName,
-              type: 'T02',
-              competencia: dynamicCompetencia,
-              timestampStr: editingAudit?.timestampStr || new Date().toISOString(),
-              ...scorePayload,
-              rawData,
-              sourceRowHash: JSON.stringify(rawData),
-              tracerNumber: '02',
-              tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
-              timestamp: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }, { merge: true }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-          ]);
-        }
+        const { doc, setDoc } = await import('firebase/firestore');
+        await Promise.race([
+          setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
+            unitId,
+            unitName,
+            auditorId: user.uid,
+            auditorName,
+            patientName,
+            medicalRecordNumber,
+            sector,
+            type: 'T02',
+            competencia: dynamicCompetencia,
+            timestampStr: editingAudit?.timestampStr || dateObj.toISOString(),
+            ...scorePayload,
+            rawData,
+            sourceRowHash: JSON.stringify(rawData),
+            tracerNumber: '02',
+            tracerName: 'Maternidades - Processos Seguros em Procedimentos Cirúrgicos',
+            timestamp: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
       } catch (syncErr: any) {
         if (syncErr?.message === 'timeout') {
           console.warn('[SafeSurgeryForm] Firestore sync timed out (persisted locally).');
         } else {
           console.warn('[SafeSurgeryForm] Firestore save notice:', syncErr?.message || syncErr);
-          if (syncErr?.message && (syncErr.message.includes('Quota') || syncErr.message.includes('resource-exhausted'))) {
-            localStorage.setItem('firestore_quota_exceeded', 'true');
-            window.dispatchEvent(new Event('firestore-quota-exceeded'));
-          }
         }
       }
 
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } catch (err: any) {
       console.error('Error in save:', err);
+      window.dispatchEvent(new Event('local-data-updated'));
       onComplete();
     } finally {
       setSubmitting(false);

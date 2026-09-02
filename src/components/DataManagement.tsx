@@ -83,13 +83,7 @@ export default function DataManagement() {
       refreshAudits();
     } catch (e: any) {
       console.error("Erro na limpeza:", e);
-      if (e?.message && (e.message.includes('Quota') || e.message.includes('resource-exhausted') || e.message.includes('quota') || e.message.includes('limit') || e.message === 'quota-exceeded')) {
-        localStorage.setItem('firestore_quota_exceeded', 'true');
-        window.dispatchEvent(new Event('firestore-quota-exceeded'));
-        addLog(`Erro ao limpar: Limite de cota do Firestore excedido.`, 'error');
-      } else {
-        addLog(`Erro ao limpar: ${e.message}`, 'error');
-      }
+      addLog(`Erro ao limpar: ${e.message}`, 'error');
     } finally {
       setSyncingId(null);
     }

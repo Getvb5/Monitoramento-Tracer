@@ -70,26 +70,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Single centralized Firestore synchronization
   useEffect(() => {
-    const quota = localStorage.getItem('firestore_quota_exceeded') === 'true';
-    if (quota) {
-      loadFromLocal();
-      return;
-    }
-
     let unsubHand: () => void = () => {};
     let unsubPatient: () => void = () => {};
     let unsubSurgery: () => void = () => {};
-
-    const handleQuotaFailure = () => {
-      localStorage.setItem('firestore_quota_exceeded', 'true');
-      setIsQuotaExceeded(true);
-      window.dispatchEvent(new Event('firestore-quota-exceeded'));
-      loadFromLocal();
-      try { unsubHand(); } catch (e) {}
-      try { unsubPatient(); } catch (e) {}
-      try { unsubSurgery(); } catch (e) {}
-      console.warn('[DataContext] Firestore em modo local devido à cota diária.');
-    };
 
     try {
       const qHand = query(collection(db, 'audits_hand_hygiene'));
@@ -107,61 +90,79 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unsubHand = onSnapshot(qHand, (s) => {
         const deletedIds = getDeletedAuditIds();
         const firestoreDocs = s.docs
-          .map(d => ({ id: d.id, ...d.data(), type: 'T03' }))
+          .map(d => {
+            const data = d.data();
+            const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
+            return {
+              id: d.id,
+              ...data,
+              type: data.type || 'T03',
+              tracerNumber: data.tracerNumber || '03',
+              timestampStr
+            };
+          })
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedHandAudits();
-        const combined = deduplicateAudits([...localList, ...firestoreDocs]);
+        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
         setHandAudits(combined);
         checkDone();
       }, (err) => {
-        if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-          handleQuotaFailure();
-        } else {
-          console.warn('[DataContext] Falha na leitura T03 do Firestore:', err?.message || err);
-          loadFromLocal();
-          checkDone();
-        }
+        console.warn('[DataContext] Falha na leitura T03 do Firestore:', err?.message || err);
+        loadFromLocal();
+        checkDone();
       });
 
       unsubPatient = onSnapshot(qPatient, (s) => {
         const deletedIds = getDeletedAuditIds();
         const firestoreDocs = s.docs
-          .map(d => ({ id: d.id, ...d.data(), type: 'T01' }))
+          .map(d => {
+            const data = d.data();
+            const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
+            return {
+              id: d.id,
+              ...data,
+              type: data.type || 'T01',
+              tracerNumber: data.tracerNumber || '01',
+              timestampStr
+            };
+          })
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedPatientAudits();
-        const combined = deduplicateAudits([...localList, ...firestoreDocs]);
+        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
         setPatientAudits(combined);
         checkDone();
       }, (err) => {
-        if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-          handleQuotaFailure();
-        } else {
-          console.warn('[DataContext] Falha na leitura T01 do Firestore:', err?.message || err);
-          loadFromLocal();
-          checkDone();
-        }
+        console.warn('[DataContext] Falha na leitura T01 do Firestore:', err?.message || err);
+        loadFromLocal();
+        checkDone();
       });
 
       unsubSurgery = onSnapshot(qSurgery, (s) => {
         const deletedIds = getDeletedAuditIds();
         const firestoreDocs = s.docs
-          .map(d => ({ id: d.id, ...d.data(), type: 'T02' }))
+          .map(d => {
+            const data = d.data();
+            const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
+            return {
+              id: d.id,
+              ...data,
+              type: data.type || 'T02',
+              tracerNumber: data.tracerNumber || '02',
+              timestampStr
+            };
+          })
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedSurgeryAudits();
-        const combined = deduplicateAudits([...localList, ...firestoreDocs]);
+        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
         setSurgeryAudits(combined);
         checkDone();
       }, (err) => {
-        if (err?.message && (err.message.includes('Quota') || err.message.includes('resource-exhausted') || err.message.includes('quota') || err.message.includes('limit'))) {
-          handleQuotaFailure();
-        } else {
-          console.warn('[DataContext] Falha na leitura T02 do Firestore:', err?.message || err);
-          loadFromLocal();
-          checkDone();
-        }
+        console.warn('[DataContext] Falha na leitura T02 do Firestore:', err?.message || err);
+        loadFromLocal();
+        checkDone();
       });
     } catch (e) {
       console.warn('[DataContext] Exceção na inicialização do Firestore:', e);
@@ -181,14 +182,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadFromLocal();
 
     // 2. Try Firestore deletion asynchronously
-    const isQuota = localStorage.getItem('firestore_quota_exceeded') === 'true';
-    if (!isQuota) {
-      try {
-        const collName = type === 'T01' ? 'audits_patient_id' : type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
-        await deleteDoc(doc(db, collName, id));
-      } catch (e: any) {
-        console.warn('[DataContext] Erro ao deletar no Firestore:', e?.message || e);
-      }
+    try {
+      const collName = type === 'T01' ? 'audits_patient_id' : type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
+      await deleteDoc(doc(db, collName, id));
+    } catch (e: any) {
+      console.warn('[DataContext] Erro ao deletar no Firestore:', e?.message || e);
     }
   }, [loadFromLocal]);
 
@@ -198,14 +196,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadFromLocal();
 
     // 2. Try Firestore update asynchronously
-    const isQuota = localStorage.getItem('firestore_quota_exceeded') === 'true';
-    if (!isQuota) {
-      try {
-        const collName = type === 'T01' ? 'audits_patient_id' : type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
-        await updateDoc(doc(db, collName, id), data);
-      } catch (e: any) {
-        console.warn('[DataContext] Erro ao atualizar no Firestore:', e?.message || e);
-      }
+    try {
+      const collName = type === 'T01' ? 'audits_patient_id' : type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
+      await updateDoc(doc(db, collName, id), data);
+    } catch (e: any) {
+      console.warn('[DataContext] Erro ao atualizar no Firestore:', e?.message || e);
     }
   }, [loadFromLocal]);
 
@@ -215,18 +210,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadFromLocal();
 
     // 2. Try Firestore save asynchronously
-    const isQuota = localStorage.getItem('firestore_quota_exceeded') === 'true';
-    if (!isQuota) {
-      try {
-        const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
-        const collName = audit.type === 'T01' ? 'audits_patient_id' : audit.type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
-        await setDoc(doc(db, collName, audit.id), {
-          ...audit,
-          timestamp: serverTimestamp()
-        });
-      } catch (e: any) {
-        console.warn('[DataContext] Erro ao salvar no Firestore:', e?.message || e);
-      }
+    try {
+      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
+      const collName = audit.type === 'T01' ? 'audits_patient_id' : audit.type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
+      await setDoc(doc(db, collName, audit.id), {
+        ...audit,
+        timestamp: serverTimestamp()
+      }, { merge: true });
+    } catch (e: any) {
+      console.warn('[DataContext] Erro ao salvar no Firestore:', e?.message || e);
     }
   }, [loadFromLocal]);
 
@@ -267,7 +259,7 @@ export function useAuditsData(): DataContextType {
       handAudits: h,
       allAudits: [...p, ...s, ...h],
       loading: false,
-      isQuotaExceeded: localStorage.getItem('firestore_quota_exceeded') === 'true',
+      isQuotaExceeded: false,
       refreshAudits: () => {},
       deleteAudit: async () => {},
       updateAudit: async () => {},
@@ -276,3 +268,5 @@ export function useAuditsData(): DataContextType {
   }
   return context;
 }
+
+export const useData = useAuditsData;
