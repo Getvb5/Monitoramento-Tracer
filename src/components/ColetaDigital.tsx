@@ -249,25 +249,30 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   };
 
   const handleDeleteAudit = async (id: string, type: string, fullAuditData?: any) => {
+    if (!id) return;
     try {
       // Find audit details safely before deletion for spreadsheet synchronization
       const allAuditsList = [
-        ...(recentAudits.all || []),
-        ...(recentAudits.my || []),
-        ...(recentAudits.unit || [])
+        ...(recentAudits?.all || []),
+        ...(recentAudits?.my || []),
+        ...(recentAudits?.unit || [])
       ];
-      const existingAudit = fullAuditData || allAuditsList.find(a => a.id === id);
+      const existingAudit = fullAuditData || allAuditsList.find(a => a?.id === id);
 
       // Optimistic UI update immediately
       setRecentAudits(prev => ({
-        my: prev.my.filter(a => a.id !== id),
-        unit: prev.unit.filter(a => a.id !== id),
-        all: prev.all.filter(a => a.id !== id)
+        my: (prev?.my || []).filter(a => a?.id !== id),
+        unit: (prev?.unit || []).filter(a => a?.id !== id),
+        all: (prev?.all || []).filter(a => a?.id !== id)
       }));
 
       // 1. Delete from local database / local storage
-      const { deleteAuditFromLocal } = await import('../lib/fallbackData');
-      deleteAuditFromLocal(id);
+      try {
+        const { deleteAuditFromLocal } = await import('../lib/fallbackData');
+        deleteAuditFromLocal(id);
+      } catch (localErr) {
+        console.warn("Local storage delete warning:", localErr);
+      }
       
       // 2. Delete from Firestore if it's not a temporary local ID
       if (id && !id.startsWith('local_')) {
@@ -276,9 +281,10 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
           const { db } = await import('../lib/firebase');
           
           let colName = '';
-          if (type === 'T01') colName = 'audits_patient_id';
-          else if (type === 'T02') colName = 'audits_safe_surgery';
-          else if (type === 'T03') colName = 'audits_hand_hygiene';
+          const normalizedType = (type || existingAudit?.type || '').toUpperCase();
+          if (normalizedType === 'T01' || normalizedType.includes('01')) colName = 'audits_patient_id';
+          else if (normalizedType === 'T02' || normalizedType.includes('02')) colName = 'audits_safe_surgery';
+          else if (normalizedType === 'T03' || normalizedType.includes('03')) colName = 'audits_hand_hygiene';
           
           if (colName) {
             await deleteDoc(doc(db, colName, id));
@@ -291,13 +297,19 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       // 3. Dispatch deletion to Destination Google Sheets Webhook
       try {
         const { deleteAuditFromGoogleSheet } = await import('../lib/googleSheetWebhook');
-        const tracerId = type === 'T01' ? 'tracer_01' : type === 'T02' ? 'tracer_02' : 'tracer_03';
+        const normalizedType = (type || existingAudit?.type || '').toUpperCase();
+        const tracerId = (normalizedType === 'T01' || normalizedType.includes('01')) 
+          ? 'tracer_01' 
+          : (normalizedType === 'T02' || normalizedType.includes('02')) 
+            ? 'tracer_02' 
+            : 'tracer_03';
+
         await deleteAuditFromGoogleSheet({
           id,
           tracerId,
-          type,
-          patientName: existingAudit?.patientName || existingAudit?.rawData?.['Nome do Paciente'] || existingAudit?.rawData?.['q4_paciente'] || '',
-          unitName: existingAudit?.unitName || existingAudit?.unitId || existingAudit?.rawData?.['Unidade de Saúde'] || '',
+          type: normalizedType || type,
+          patientName: existingAudit?.patientName || existingAudit?.rawData?.['Nome do Paciente'] || existingAudit?.rawData?.['Nome Completo do Paciente:'] || existingAudit?.rawData?.['q4_paciente'] || existingAudit?.rawData?.['q6_paciente'] || '',
+          unitName: existingAudit?.unitName || existingAudit?.unitId || existingAudit?.rawData?.['Unidade de Saúde'] || existingAudit?.rawData?.['01- Unidade de Saúde:'] || '',
           timestamp: existingAudit?.timestampStr || existingAudit?.timestamp || existingAudit?.date || existingAudit?.rawData?.['Carimbo de data/hora'] || '',
           rawData: existingAudit?.rawData || {}
         });
@@ -311,14 +323,26 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       }
       
       // 5. Reload lists and dispatch sync event
-      loadRecentAudits();
+      try {
+        await loadRecentAudits();
+      } catch (loadErr) {
+        console.warn("Error reloading audits after deletion:", loadErr);
+      }
       
       // Dispatch event to update other dashboard components
       window.dispatchEvent(new Event('local-data-updated'));
       triggerToast("Coleta excluída com sucesso!", "success");
     } catch (err) {
       console.error("Erro ao excluir coleta:", err);
-      triggerToast("Não foi possível excluir a coleta.", "error");
+      // Fallback guarantees local purge
+      try {
+        const { deleteAuditFromLocal } = await import('../lib/fallbackData');
+        deleteAuditFromLocal(id);
+        window.dispatchEvent(new Event('local-data-updated'));
+        triggerToast("Coleta excluída com sucesso!", "success");
+      } catch (e2) {
+        triggerToast("Não foi possível excluir a coleta.", "error");
+      }
     }
   };
 

@@ -198,8 +198,9 @@ export function safeSaveCustomLocalAudits(items: any[]) {
 }
 
 export function getCustomLocalAudits(): LocalAudit[] {
+  const deletedIds = getDeletedAuditIds();
   if (inMemoryAudits && inMemoryAudits.length > 0) {
-    return inMemoryAudits;
+    return inMemoryAudits.filter(a => a && a.id && !deletedIds.includes(a.id));
   }
   try {
     const raw = localStorage.getItem('custom_local_audits');
@@ -216,6 +217,7 @@ export function getCustomLocalAudits(): LocalAudit[] {
     const deduplicated = deduplicateAudits(combined);
 
     const hydrated = deduplicated
+      .filter((item: any) => item && item.id && !deletedIds.includes(item.id))
       .map((item: any) => ({
         ...item,
         timestamp: {
@@ -228,7 +230,7 @@ export function getCustomLocalAudits(): LocalAudit[] {
     return hydrated;
   } catch (e) {
     console.error('Error parsing custom local audits:', e);
-    return inMemoryAudits || [];
+    return (inMemoryAudits || []).filter(a => a && a.id && !deletedIds.includes(a.id));
   }
 }
 
@@ -308,8 +310,12 @@ export function deleteAuditFromLocal(id: string) {
       }
     }
     
+    if (inMemoryAudits) {
+      inMemoryAudits = inMemoryAudits.filter((item: any) => item && item.id !== id);
+    }
+
     const custom = getCustomLocalAudits();
-    const updated = custom.filter((item: any) => item.id !== id);
+    const updated = custom.filter((item: any) => item && item.id !== id);
     safeSaveCustomLocalAudits(updated);
     
     window.dispatchEvent(new Event('local-data-updated'));
