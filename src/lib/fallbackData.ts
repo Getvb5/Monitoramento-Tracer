@@ -34,11 +34,17 @@ export function getAuditFingerprint(a: any): string {
   const type = rawType.includes('01') || rawType === 'T01' ? 'T01' : rawType.includes('02') || rawType === 'T02' ? 'T02' : rawType.includes('03') || rawType === 'T03' ? 'T03' : rawType;
   
   const unit = normalizeStr(a.unitId || a.hospitalId || a.unidadeId || a.unitName || '');
+
+  // 1. If the record has an ID, use it as primary key
+  if (a.id) {
+    return `${type}__${unit}__${a.id}`;
+  }
+
   const raw = a.rawData || (a.sourceRowHash ? (typeof a.sourceRowHash === 'object' ? a.sourceRowHash : (typeof a.sourceRowHash === 'string' ? (() => { try { return JSON.parse(a.sourceRowHash); } catch { return {}; } })() : {})) : {});
   
   const carimbo = normalizeStr(
     raw['Carimbo de data/hora'] || raw['CARIMBO DE DATA/HORA'] || raw['Data do Tracer:'] || raw['03- Data do Tracer:'] || raw['Data da Coleta:'] || a.timestampStr || ''
-  ).split('t')[0].split(' ')[0];
+  );
 
   const patient = normalizeStr(
     a.patientName || raw['Nome Completo do Paciente:'] || raw['Nome Completo do Paciente'] || raw['07- Nome do paciente:'] || raw['07- Nome Completo do Paciente:'] || raw['07- Nome da paciente:'] || raw['Nome Completo da Paciente:'] || raw['Nome do paciente:'] || raw['Paciente:'] || raw['Paciente'] || ''
@@ -56,33 +62,7 @@ export function getAuditFingerprint(a: any): string {
     a.sector || raw['Setor Auditado:'] || raw['Setor Auditado'] || raw['05- Setor Auditado:'] || raw['04- Setor Auditado:'] || raw['Setor:'] || raw['Setor'] || ''
   );
 
-  // 1. Exact match on patient and medical record number
-  if (patient && patient !== '-' && mrn && mrn !== '-') {
-    return `${type}__${unit}__${patient}__${mrn}`;
-  }
-
-  // 2. Match on patient and date
-  if (patient && patient !== '-' && carimbo && carimbo !== '-') {
-    return `${type}__${unit}__${carimbo}__${patient}`;
-  }
-
-  // 3. Match on MRN and date
-  if (mrn && mrn !== '-' && carimbo && carimbo !== '-') {
-    return `${type}__${unit}__${carimbo}__${mrn}`;
-  }
-
-  // 4. Match on patient and auditor/sector
-  if (patient && patient !== '-' && auditor && sector) {
-    return `${type}__${unit}__${patient}__${auditor}__${sector}`;
-  }
-
-  // 5. Match on date, auditor and sector (standard for medication / hand hygiene audits)
-  if (carimbo && carimbo !== '-' && auditor && auditor !== '-' && sector && sector !== '-') {
-    return `${type}__${unit}__${carimbo}__${auditor}__${sector}`;
-  }
-
-  // 6. Direct ID fallback
-  return a.id ? `${type}__${unit}__id_${a.id}` : Math.random().toString();
+  return `${type}__${unit}__${carimbo}__${patient}__${mrn}__${auditor}__${sector}`;
 }
 
 export function deduplicateAudits(list: any[]): any[] {
@@ -133,6 +113,7 @@ export function deduplicateAudits(list: any[]): any[] {
 }
 
 export function purgeSyntheticData() {
+  if (typeof localStorage === 'undefined') return;
   try {
     const raw = localStorage.getItem('custom_local_audits');
     if (raw) {
