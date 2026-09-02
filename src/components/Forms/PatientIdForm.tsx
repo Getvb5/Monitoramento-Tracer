@@ -18,6 +18,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
   const [unitId, setUnitId] = useState(userUnit || '');
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState('');
+  const [errorFieldId, setErrorFieldId] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const getTodayDateStr = () => {
@@ -223,6 +224,11 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
       return next;
     });
+
+    if (error) {
+      setError('');
+      setErrorFieldId('');
+    }
   };
 
   // Step names
@@ -234,78 +240,91 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
     { id: 5, title: 'Segurança & Quedas' }
   ];
 
-  const validateStep = (step: number): string | null => {
+  const scrollToField = (fieldId: string) => {
+    setTimeout(() => {
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
+
+  const validateStep = (step: number): { message: string; fieldId: string } | null => {
     if (step === 1) {
-      if (!unitId) return 'Por favor, selecione a unidade de saúde.';
-      if (!formData.q2_data) return 'Preencha a data do Tracer.';
-      if (!formData.q3_horario) return 'Preencha o horário de início do Tracer.';
-      if (!formData.q4_setor.trim()) return 'Preencha o setor auditado.';
-      if (!formData.q5_auditor.trim()) return 'Preencha o nome completo do auditor.';
-      if (!formData.q6_paciente.trim()) return 'Preencha o nome completo do paciente.';
-      if (!formData.q7_prontuario.trim()) return 'Preencha o número do prontuário do paciente.';
+      if (!unitId) return { message: 'Por favor, selecione a unidade de saúde no início.', fieldId: 'field-01' };
+      if (!formData.q2_data) return { message: 'Preencha o campo 02: Data do Tracer.', fieldId: 'field-02' };
+      if (!formData.q3_horario) return { message: 'Preencha o campo 03: Horário do Início do Tracer.', fieldId: 'field-03' };
+      if (!formData.q4_setor.trim()) return { message: 'Preencha o campo 04: Setor Auditado.', fieldId: 'field-04' };
+      if (!formData.q5_auditor.trim()) return { message: 'Preencha o campo 05: Nome Completo do Auditor.', fieldId: 'field-05' };
+      if (!formData.q6_paciente.trim()) return { message: 'Preencha o campo 06: Nome Completo do Paciente.', fieldId: 'field-06' };
+      if (!formData.q7_prontuario.trim()) return { message: 'Preencha o campo 07: Nº do Prontuário do Paciente.', fieldId: 'field-07' };
     }
     if (step === 2) {
-      if (!formData.q8_compreende_plano) return 'Responda se o paciente compreende o plano terapêutico.';
-      if (formData.q8_compreende_plano === 'Não' && !formData.q9_compreende_plano_justificativa.trim()) return 'Preencha a justificativa do plano terapêutico.';
-      if (!formData.q10_pulseira_branca) return 'Responda se o paciente está identificado com pulseira branca.';
-      if (formData.q10_pulseira_branca === 'Não' && !formData.q11_pulseira_branca_justificativa.trim()) return 'Preencha a justificativa da pulseira branca.';
-      if (!formData.q12_pulseira_legivel) return 'Responda se a pulseira de identificação está legível.';
-      if (formData.q12_pulseira_legivel === 'Não' && !formData.q13_pulseira_legivel_justificativa.trim()) return 'Preencha a justificativa da legibilidade.';
-      if (!formData.q14_pulseira_preenchida) return 'Responda se a pulseira está preenchida adequadamente.';
-      if (formData.q14_pulseira_preenchida === 'Não' && !formData.q15_pulseira_preenchida_justificativa.trim()) return 'Preencha a justificativa do preenchimento da pulseira.';
-      if (!formData.q16_alergia) return 'Responda se o paciente tem alguma alergia alimentar ou medicamentosa.';
+      if (!formData.q8_compreende_plano) return { message: 'Responda a Questão 08: Paciente ou responsável compreende o plano terapêutico?', fieldId: 'field-08' };
+      if (formData.q8_compreende_plano === 'Não' && !formData.q9_compreende_plano_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 09 (Plano terapêutico).', fieldId: 'field-09' };
+      if (!formData.q10_pulseira_branca) return { message: 'Responda a Questão 10: Paciente identificado com pulseira branca?', fieldId: 'field-10' };
+      if (formData.q10_pulseira_branca === 'Não' && !formData.q11_pulseira_branca_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 11 (Pulseira branca).', fieldId: 'field-11' };
+      if (!formData.q12_pulseira_legivel) return { message: 'Responda a Questão 12: A pulseira de identificação está legível?', fieldId: 'field-12' };
+      if (formData.q12_pulseira_legivel === 'Não' && !formData.q13_pulseira_legivel_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 13 (Legibilidade).', fieldId: 'field-13' };
+      if (!formData.q14_pulseira_preenchida) return { message: 'Responda a Questão 14: A pulseira de identificação está preenchida adequadamente?', fieldId: 'field-14' };
+      if (formData.q14_pulseira_preenchida === 'Não' && !formData.q15_pulseira_preenchida_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 15 (Preenchimento da pulseira).', fieldId: 'field-15' };
+      if (!formData.q16_alergia) return { message: 'Responda a Questão 16: O paciente tem alergia alimentar/medicamentosa?', fieldId: 'field-16' };
       if (formData.q16_alergia === 'Sim') {
-        if (!formData.q17_alergia_sinalizada) return 'Responda se a alergia está sinalizada com a pulseira específica rosa.';
-        if (formData.q17_alergia_sinalizada === 'Não' && !formData.q18_alergia_justificativa.trim()) return 'Preencha a justificativa da cor de indicação de alergia.';
+        if (!formData.q17_alergia_sinalizada) return { message: 'Responda a Questão 17: Se tem alergia, está sinalizado com pulseira específica (Rosa)?', fieldId: 'field-17' };
+        if (formData.q17_alergia_sinalizada === 'Não' && !formData.q18_alergia_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 18 (Indicação de alergia).', fieldId: 'field-18' };
       }
     }
     if (step === 3) {
-      if (!formData.q19_placa_leito) return 'Responda se a placa de identificação do leito está afixada.';
-      if (formData.q19_placa_leito === 'Não' && !formData.q20_placa_leito_justificativa.trim()) return 'Preencha a justificativa da placa do leito.';
-      if (!formData.q21_placa_preenchida) return 'Responda se a placa de identificação está preenchida adequadamente.';
-      if (formData.q21_placa_preenchida === 'Não' && !formData.q22_placa_preenchida_justificativa.trim()) return 'Preencha a justificativa da placa preenchida.';
-      if (!formData.q23_placa_riscos) return 'Responda se a placa possui riscos sinalizados.';
-      if (formData.q23_placa_riscos === 'Não' && !formData.q24_placa_riscos_justificativa.trim()) return 'Preencha a justificativa da placa sem riscos.';
-      if (!formData.q25_rotulos_dieta) return 'Responda se os rótulos de dieta contêm os identificadores obrigatórios.';
-      if (formData.q25_rotulos_dieta === 'Não' && !formData.q26_rotulos_dieta_justificativa.trim()) return 'Preencha a justificativa do rótulo da dieta.';
-      if (!formData.q27_rotulo_medicamento) return 'Responda se o rótulo de medicamentos está completo.';
+      if (!formData.q19_placa_leito) return { message: 'Responda a Questão 19: Placa de identificação do leito afixada?', fieldId: 'field-19' };
+      if (formData.q19_placa_leito === 'Não' && !formData.q20_placa_leito_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 20 (Placa do leito).', fieldId: 'field-20' };
+      if (!formData.q21_placa_preenchida) return { message: 'Responda a Questão 21: Placa de identificação preenchida adequadamente?', fieldId: 'field-21' };
+      if (formData.q21_placa_preenchida === 'Não' && !formData.q22_placa_preenchida_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 22 (Preenchimento da placa).', fieldId: 'field-22' };
+      if (!formData.q23_placa_riscos) return { message: 'Responda a Questão 23: Placa de identificação do leito com riscos sinalizados?', fieldId: 'field-23' };
+      if (formData.q23_placa_riscos === 'Não' && !formData.q24_placa_riscos_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 24 (Riscos sinalizados).', fieldId: 'field-24' };
+      if (!formData.q25_rotulos_dieta) return { message: 'Responda a Questão 25: Os rótulos da dieta estão com identificadores obrigatórios?', fieldId: 'field-25' };
+      if (formData.q25_rotulos_dieta === 'Não' && !formData.q26_rotulos_dieta_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 26 (Rótulo da dieta).', fieldId: 'field-26' };
+      if (!formData.q27_rotulo_medicamento) return { message: 'Responda a Questão 27: O rótulo de medicamentos está com identificadores obrigatórios?', fieldId: 'field-27' };
     }
     if (step === 4) {
-      if (!formData.q28_higienizacao_maos) return 'Responda se houve a higienização das mãos.';
-      if (formData.q28_higienizacao_maos === 'Não' && !formData.q29_higienizacao_maos_justificativa.trim()) return 'Preencha a justificativa da higienização das mãos.';
-      if (!formData.q30_acesso_venoso) return 'Responda se o acesso venoso está identificado adequadamente.';
-      if (formData.q30_acesso_venoso === 'Não' && !formData.q31_acesso_venoso_justificativa.trim()) return 'Preencha a justificativa da identificação de punção.';
-      if (!formData.q32_curativo_ferida) return 'Responda sobre a integridade e identificação do curativo de ferida.';
-      if (formData.q32_curativo_ferida === 'Não' && !formData.q33_curativo_ferida_justificativa.trim()) return 'Preencha a justificativa sobre o curativo da ferida.';
+      if (!formData.q28_higienizacao_maos) return { message: 'Responda a Questão 28: A higienização das mãos foi realizada?', fieldId: 'field-28' };
+      if (formData.q28_higienizacao_maos === 'Não' && !formData.q29_higienizacao_maos_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 29 (Higienização das mãos).', fieldId: 'field-29' };
+      if (!formData.q30_acesso_venoso) return { message: 'Responda a Questão 30: Acesso venoso foi identificado adequadamente?', fieldId: 'field-30' };
+      if (formData.q30_acesso_venoso === 'Não' && !formData.q31_acesso_venoso_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 31 (Acesso venoso).', fieldId: 'field-31' };
+      if (!formData.q32_curativo_ferida) return { message: 'Responda a Questão 32: Curativo da ferida identificado, válido e íntegro?', fieldId: 'field-32' };
+      if (formData.q32_curativo_ferida === 'Não' && !formData.q33_curativo_ferida_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 33 (Curativo da ferida).', fieldId: 'field-33' };
     }
     if (step === 5) {
-      if (!formData.q34_decubito_correto) return 'Responda sobre o decúbito de acordo com o relógio de pele.';
-      if (formData.q34_decubito_correto === 'Não' && !formData.q35_decubito_correto_justificativa.trim()) return 'Preencha a justificativa do decúbito.';
-      if (!formData.q36_orientacao_lesao) return 'Responda se o paciente recebeu orientação de prevenção de LPP.';
-      if (!formData.q37_grades_elevadas) return 'Responda se as grades do leito estão elevadas.';
-      if (formData.q37_grades_elevadas === 'Não' && !formData.q38_grades_elevadas_justificativa.trim()) return 'Preencha a justificativa das grades do leito.';
-      if (!formData.q39_orientacao_queda) return 'Responda se o paciente recebeu orientação sobre prevenção de quedas.';
-      if (!formData.q40_passagem_plantao) return 'Responda sobre a passagem de plantão com formulário padrão preenchido.';
-      if (formData.q40_passagem_plantao === 'Não' && !formData.q41_passagem_plantao_justificativa.trim()) return 'Preencha a justificativa da passagem de plantão.';
-      if (!formData.q42_SBAR) return 'Responda se o formulário SBAR foi preenchido na transferência.';
-      if (formData.q42_SBAR === 'Não' && !formData.q43_SBAR_justificativa.trim()) return 'Preencha a justificativa sobre o formulário SBAR.';
+      if (!formData.q34_decubito_correto) return { message: 'Responda a Questão 34: Paciente está no decúbito correto de acordo com o relógio da pele?', fieldId: 'field-34' };
+      if (formData.q34_decubito_correto === 'Não' && !formData.q35_decubito_correto_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 35 (Decúbito incorreto).', fieldId: 'field-35' };
+      if (!formData.q36_orientacao_lesao) return { message: 'Responda a Questão 36: Paciente recebeu orientação de prevenção de lesão por pressão?', fieldId: 'field-36' };
+      if (!formData.q37_grades_elevadas) return { message: 'Responda a Questão 37: Grades do leito elevadas?', fieldId: 'field-37' };
+      if (formData.q37_grades_elevadas === 'Não' && !formData.q38_grades_elevadas_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 38 (Grades do leito).', fieldId: 'field-38' };
+      if (!formData.q39_orientacao_queda) return { message: 'Responda a Questão 39: O paciente recebeu orientação sobre as medidas de prevenção de queda?', fieldId: 'field-39' };
+      if (!formData.q40_passagem_plantao) return { message: 'Responda a Questão 40: Passagem de plantão com formulário padrão preenchido?', fieldId: 'field-40' };
+      if (formData.q40_passagem_plantao === 'Não' && !formData.q41_passagem_plantao_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 41 (Passagem de plantão).', fieldId: 'field-41' };
+      if (!formData.q42_SBAR) return { message: 'Responda a Questão 42: Em caso de transferência, formulário SBAR preenchido adequadamente?', fieldId: 'field-42' };
+      if (formData.q42_SBAR === 'Não' && !formData.q43_SBAR_justificativa.trim()) return { message: 'Preencha a justificativa da Questão 43 (Formulário SBAR).', fieldId: 'field-43' };
     }
     return null;
   };
 
   const handleNext = () => {
-    const validationError = validateStep(currentStep);
-    if (validationError) {
-      setError(validationError);
+    const validationResult = validateStep(currentStep);
+    if (validationResult) {
+      setError(validationResult.message);
+      setErrorFieldId(validationResult.fieldId);
+      scrollToField(validationResult.fieldId);
       return;
     }
     setError('');
+    setErrorFieldId('');
     setCurrentStep(prev => Math.min(prev + 1, 5));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleBack = () => {
     setError('');
+    setErrorFieldId('');
     setCurrentStep(prev => Math.max(prev - 1, 1));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -321,17 +340,19 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
     // Validate all steps from 1 to 5
     for (let step = 1; step <= 5; step++) {
-      const validationError = validateStep(step);
-      if (validationError) {
-        setError(validationError);
+      const validationResult = validateStep(step);
+      if (validationResult) {
+        setError(validationResult.message);
+        setErrorFieldId(validationResult.fieldId);
         setCurrentStep(step);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollToField(validationResult.fieldId);
         return;
       }
     }
 
     setSubmitting(true);
     setError('');
+    setErrorFieldId('');
 
     // Construct rawData EXACTLY as it appears in Google Forms matching PDF
     const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
@@ -590,7 +611,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
+                      <div id="field-01" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-01' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
                           01. Nome do Hospital/Maternidade * {!isAdmin && userUnit && <span className="text-blue-600 font-black">(Vinculado ao seu perfil)</span>}
                         </label>
@@ -598,74 +619,74 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                           value={unitId}
                           onChange={(e) => handleUnitSelect(e.target.value)}
                           disabled={!isAdmin && !!userUnit}
-                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md outline-none text-slate-800 transition-all ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500'}`}
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md outline-none text-slate-800 transition-all ${errorFieldId === 'field-01' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'} ${!isAdmin && userUnit ? 'bg-slate-100 cursor-not-allowed opacity-90 text-blue-900 font-black' : 'focus:ring-2 focus:ring-blue-500'}`}
                         >
                           <option value="">Selecione a unidade...</option>
                           {filteredUnits.filter(u => isAdmin || !userUnit || u.id === userUnit).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                         </select>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div id="field-02" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-02' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">02. Data do Tracer *</label>
                         <input
                           type="date"
                           value={formData.q2_data}
                           onChange={(e) => handleFieldChange('q2_data', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-02' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div id="field-03" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-03' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">03. Horário do Início *</label>
                         <input
                           type="time"
                           value={formData.q3_horario}
                           onChange={(e) => handleFieldChange('q3_horario', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-03' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div id="field-04" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-04' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">04. Setor Auditado *</label>
                         <input
                           type="text"
                           placeholder="Ex: UTI Neonatal, Enfermaria B"
                           value={formData.q4_setor}
                           onChange={(e) => handleFieldChange('q4_setor', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-04' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
 
-                      <div className="col-span-1 md:col-span-2 space-y-1.5">
+                      <div id="field-05" className={`col-span-1 md:col-span-2 space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-05' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">05. Nome Completo do Auditor *</label>
                         <input
                           type="text"
                           placeholder="Nome do profissional coletor"
                           value={formData.q5_auditor}
                           onChange={(e) => handleFieldChange('q5_auditor', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-05' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div id="field-06" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-06' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">06. Nome do paciente *</label>
                         <input
                           type="text"
                           placeholder="Nome do paciente"
                           value={formData.q6_paciente}
                           onChange={(e) => handleFieldChange('q6_paciente', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-06' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div id="field-07" className={`space-y-1.5 p-2 rounded-lg transition-all ${errorFieldId === 'field-07' ? 'bg-rose-50 border border-rose-300 ring-2 ring-rose-400/30' : ''}`}>
                         <label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">07. Nº do Prontuário do Paciente *</label>
                         <input
                           type="text"
                           placeholder="Identificador ou Código"
                           value={formData.q7_prontuario}
                           onChange={(e) => handleFieldChange('q7_prontuario', e.target.value)}
-                          className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800"
+                          className={`w-full text-xs font-bold p-2.5 bg-slate-50 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 ${errorFieldId === 'field-07' ? 'border-rose-400 bg-white ring-1 ring-rose-400' : 'border-slate-200'}`}
                         />
                       </div>
                     </div>
@@ -687,12 +708,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q8_compreende_plano}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q8_compreende_plano', val)}
+                        hasError={errorFieldId === 'field-08'}
                       />
                       {formData.q8_compreende_plano === 'Não' && (
                         <TextJustifyField
                           index="09"
                           value={formData.q9_compreende_plano_justificativa}
                           onChange={(val) => handleFieldChange('q9_compreende_plano_justificativa', val)}
+                          hasError={errorFieldId === 'field-09'}
                         />
                       )}
 
@@ -702,12 +725,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q10_pulseira_branca}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q10_pulseira_branca', val)}
+                        hasError={errorFieldId === 'field-10'}
                       />
                       {formData.q10_pulseira_branca === 'Não' && (
                         <TextJustifyField
                           index="11"
                           value={formData.q11_pulseira_branca_justificativa}
                           onChange={(val) => handleFieldChange('q11_pulseira_branca_justificativa', val)}
+                          hasError={errorFieldId === 'field-11'}
                         />
                       )}
 
@@ -717,12 +742,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q12_pulseira_legivel}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q12_pulseira_legivel', val)}
+                        hasError={errorFieldId === 'field-12'}
                       />
                       {formData.q12_pulseira_legivel === 'Não' && (
                         <TextJustifyField
                           index="13"
                           value={formData.q13_pulseira_legivel_justificativa}
                           onChange={(val) => handleFieldChange('q13_pulseira_legivel_justificativa', val)}
+                          hasError={errorFieldId === 'field-13'}
                         />
                       )}
 
@@ -732,12 +759,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q14_pulseira_preenchida}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q14_pulseira_preenchida', val)}
+                        hasError={errorFieldId === 'field-14'}
                       />
                       {formData.q14_pulseira_preenchida === 'Não' && (
                         <TextJustifyField
                           index="15"
                           value={formData.q15_pulseira_preenchida_justificativa}
                           onChange={(val) => handleFieldChange('q15_pulseira_preenchida_justificativa', val)}
+                          hasError={errorFieldId === 'field-15'}
                         />
                       )}
 
@@ -747,6 +776,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q16_alergia}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q16_alergia', val)}
+                        hasError={errorFieldId === 'field-16'}
                       />
 
                       {formData.q16_alergia === 'Sim' && (
@@ -757,12 +787,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                             value={formData.q17_alergia_sinalizada}
                             options={['Sim', 'Não', 'Não se aplica']}
                             onChange={(val) => handleFieldChange('q17_alergia_sinalizada', val)}
+                            hasError={errorFieldId === 'field-17'}
                           />
                           {formData.q17_alergia_sinalizada === 'Não' && (
                             <TextJustifyField
                               index="18"
                               value={formData.q18_alergia_justificativa}
                               onChange={(val) => handleFieldChange('q18_alergia_justificativa', val)}
+                              hasError={errorFieldId === 'field-18'}
                             />
                           )}
                         </div>
@@ -786,12 +818,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q19_placa_leito}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q19_placa_leito', val)}
+                        hasError={errorFieldId === 'field-19'}
                       />
                       {formData.q19_placa_leito === 'Não' && (
                         <TextJustifyField
                           index="20"
                           value={formData.q20_placa_leito_justificativa}
                           onChange={(val) => handleFieldChange('q20_placa_leito_justificativa', val)}
+                          hasError={errorFieldId === 'field-20'}
                         />
                       )}
 
@@ -801,12 +835,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q21_placa_preenchida}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q21_placa_preenchida', val)}
+                        hasError={errorFieldId === 'field-21'}
                       />
                       {formData.q21_placa_preenchida === 'Não' && (
                         <TextJustifyField
                           index="22"
                           value={formData.q22_placa_preenchida_justificativa}
                           onChange={(val) => handleFieldChange('q22_placa_preenchida_justificativa', val)}
+                          hasError={errorFieldId === 'field-22'}
                         />
                       )}
 
@@ -816,12 +852,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q23_placa_riscos}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q23_placa_riscos', val)}
+                        hasError={errorFieldId === 'field-23'}
                       />
                       {formData.q23_placa_riscos === 'Não' && (
                         <TextJustifyField
                           index="24"
                           value={formData.q24_placa_riscos_justificativa}
                           onChange={(val) => handleFieldChange('q24_placa_riscos_justificativa', val)}
+                          hasError={errorFieldId === 'field-24'}
                         />
                       )}
 
@@ -831,12 +869,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q25_rotulos_dieta}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q25_rotulos_dieta', val)}
+                        hasError={errorFieldId === 'field-25'}
                       />
                       {formData.q25_rotulos_dieta === 'Não' && (
                         <TextJustifyField
                           index="26"
                           value={formData.q26_rotulos_dieta_justificativa}
                           onChange={(val) => handleFieldChange('q26_rotulos_dieta_justificativa', val)}
+                          hasError={errorFieldId === 'field-26'}
                         />
                       )}
 
@@ -846,6 +886,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q27_rotulo_medicamento}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q27_rotulo_medicamento', val)}
+                        hasError={errorFieldId === 'field-27'}
                       />
                     </div>
                   </div>
@@ -866,12 +907,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q28_higienizacao_maos}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q28_higienizacao_maos', val)}
+                        hasError={errorFieldId === 'field-28'}
                       />
                       {formData.q28_higienizacao_maos === 'Não' && (
                         <TextJustifyField
                           index="29"
                           value={formData.q29_higienizacao_maos_justificativa}
                           onChange={(val) => handleFieldChange('q29_higienizacao_maos_justificativa', val)}
+                          hasError={errorFieldId === 'field-29'}
                         />
                       )}
 
@@ -881,12 +924,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q30_acesso_venoso}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q30_acesso_venoso', val)}
+                        hasError={errorFieldId === 'field-30'}
                       />
                       {formData.q30_acesso_venoso === 'Não' && (
                         <TextJustifyField
                           index="31"
                           value={formData.q31_acesso_venoso_justificativa}
                           onChange={(val) => handleFieldChange('q31_acesso_venoso_justificativa', val)}
+                          hasError={errorFieldId === 'field-31'}
                         />
                       )}
 
@@ -896,12 +941,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q32_curativo_ferida}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q32_curativo_ferida', val)}
+                        hasError={errorFieldId === 'field-32'}
                       />
                       {formData.q32_curativo_ferida === 'Não' && (
                         <TextJustifyField
                           index="33"
                           value={formData.q33_curativo_ferida_justificativa}
                           onChange={(val) => handleFieldChange('q33_curativo_ferida_justificativa', val)}
+                          hasError={errorFieldId === 'field-33'}
                         />
                       )}
                     </div>
@@ -923,12 +970,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q34_decubito_correto}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q34_decubito_correto', val)}
+                        hasError={errorFieldId === 'field-34'}
                       />
                       {formData.q34_decubito_correto === 'Não' && (
                         <TextJustifyField
                           index="35"
                           value={formData.q35_decubito_correto_justificativa}
                           onChange={(val) => handleFieldChange('q35_decubito_correto_justificativa', val)}
+                          hasError={errorFieldId === 'field-35'}
                         />
                       )}
 
@@ -938,6 +987,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q36_orientacao_lesao}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q36_orientacao_lesao', val)}
+                        hasError={errorFieldId === 'field-36'}
                       />
 
                       <ChoiceRow
@@ -946,12 +996,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q37_grades_elevadas}
                         options={['Sim', 'Não', 'Paciente fora do leito no momento da visita']}
                         onChange={(val) => handleFieldChange('q37_grades_elevadas', val)}
+                        hasError={errorFieldId === 'field-37'}
                       />
                       {formData.q37_grades_elevadas === 'Não' && (
                         <TextJustifyField
                           index="38"
                           value={formData.q38_grades_elevadas_justificativa}
                           onChange={(val) => handleFieldChange('q38_grades_elevadas_justificativa', val)}
+                          hasError={errorFieldId === 'field-38'}
                         />
                       )}
 
@@ -961,6 +1013,7 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q39_orientacao_queda}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q39_orientacao_queda', val)}
+                        hasError={errorFieldId === 'field-39'}
                       />
 
                       <ChoiceRow
@@ -969,12 +1022,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q40_passagem_plantao}
                         options={['Sim', 'Não']}
                         onChange={(val) => handleFieldChange('q40_passagem_plantao', val)}
+                        hasError={errorFieldId === 'field-40'}
                       />
                       {formData.q40_passagem_plantao === 'Não' && (
                         <TextJustifyField
                           index="41"
                           value={formData.q41_passagem_plantao_justificativa}
                           onChange={(val) => handleFieldChange('q41_passagem_plantao_justificativa', val)}
+                          hasError={errorFieldId === 'field-41'}
                         />
                       )}
 
@@ -984,12 +1039,14 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
                         value={formData.q42_SBAR}
                         options={['Sim', 'Não', 'Não se aplica']}
                         onChange={(val) => handleFieldChange('q42_SBAR', val)}
+                        hasError={errorFieldId === 'field-42'}
                       />
                       {formData.q42_SBAR === 'Não' && (
                         <TextJustifyField
                           index="43"
                           value={formData.q43_SBAR_justificativa}
                           onChange={(val) => handleFieldChange('q43_SBAR_justificativa', val)}
+                          hasError={errorFieldId === 'field-43'}
                         />
                       )}
                     </div>
@@ -1001,9 +1058,21 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
           {/* Validation Error Banner */}
           {error && (
-            <div className="flex items-center gap-2 p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold uppercase tracking-wide animate-pulse">
-              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-              <span className="flex-1 leading-snug">{error}</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-rose-50 border-2 border-rose-300 rounded-xl text-rose-800 text-xs font-bold uppercase tracking-wide shadow-sm animate-pulse">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                <span className="leading-snug">{error}</span>
+              </div>
+              {errorFieldId && (
+                <button
+                  type="button"
+                  onClick={() => scrollToField(errorFieldId)}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-black tracking-wider uppercase transition-colors shrink-0 flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <span>Ir para a questão</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
 
@@ -1075,17 +1144,33 @@ interface ChoiceRowProps {
   value: string;
   options: string[];
   onChange: (value: string) => void;
+  hasError?: boolean;
 }
 
-function ChoiceRow({ index, label, value, options, onChange }: ChoiceRowProps) {
+function ChoiceRow({ index, label, value, options, onChange, hasError }: ChoiceRowProps) {
+  const fieldId = `field-${index}`;
   return (
-    <div className="bg-slate-50/50 p-4 rounded-lg border border-slate-100 space-y-3 hover:border-slate-200 hover:bg-slate-50/70 transition-all">
-      <div className="flex gap-2">
-        <span className="text-[10px] font-black text-rose-500 shrink-0 mt-0.5">{index}.</span>
-        <span className="text-xs font-bold text-slate-700 leading-relaxed uppercase tracking-tight">{label} *</span>
+    <div 
+      id={fieldId}
+      className={`p-4 rounded-xl border transition-all duration-300 ${
+        hasError 
+          ? 'bg-rose-50/90 border-rose-400 ring-2 ring-rose-400/40 shadow-sm' 
+          : 'bg-slate-50/50 border-slate-100 space-y-3 hover:border-slate-200 hover:bg-slate-50/70'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex gap-2">
+          <span className={`text-[11px] font-black shrink-0 mt-0.5 ${hasError ? 'text-rose-600 font-black' : 'text-rose-500'}`}>{index}.</span>
+          <span className={`text-xs font-bold leading-relaxed uppercase tracking-tight ${hasError ? 'text-slate-900 font-black' : 'text-slate-700'}`}>{label} *</span>
+        </div>
+        {hasError && (
+          <span className="shrink-0 px-2 py-0.5 bg-rose-600 text-white text-[9px] font-black uppercase tracking-wider rounded-md animate-pulse">
+            Preenchimento Obrigatório
+          </span>
+        )}
       </div>
 
-      <div className="flex flex-wrap gap-2 pt-1">
+      <div className="flex flex-wrap gap-2 pt-2">
         {options.map((opt) => {
           const isSelected = value === opt;
           return (
@@ -1096,7 +1181,9 @@ function ChoiceRow({ index, label, value, options, onChange }: ChoiceRowProps) {
               className={`px-3.5 py-2 text-[10.5px] font-black uppercase tracking-wider rounded-md border transition-all cursor-pointer ${
                 isSelected
                   ? 'bg-red-500 border-red-500 text-white shadow-sm scale-[1.02]'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  : hasError
+                    ? 'bg-white border-rose-300 text-rose-800 hover:bg-rose-100/50 font-bold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900'
               }`}
             >
               {opt}
@@ -1112,25 +1199,41 @@ interface TextJustifyFieldProps {
   index: string;
   value: string;
   onChange: (value: string) => void;
+  hasError?: boolean;
 }
 
-function TextJustifyField({ index, value, onChange }: TextJustifyFieldProps) {
+function TextJustifyField({ index, value, onChange, hasError }: TextJustifyFieldProps) {
+  const fieldId = `field-${index}`;
   return (
     <motion.div
+      id={fieldId}
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
       exit={{ opacity: 0, height: 0 }}
-      className="pl-4 border-l-2 border-red-200 space-y-1.5"
+      className={`pl-4 border-l-2 space-y-1.5 p-2 rounded-r-lg transition-all ${
+        hasError ? 'border-rose-500 bg-rose-50/60 ring-1 ring-rose-400' : 'border-red-200'
+      }`}
     >
-      <label className="text-[10px] font-black uppercase text-red-500 tracking-wider">
-        {index}. Se não, justifique *
-      </label>
+      <div className="flex items-center justify-between">
+        <label className={`text-[10px] font-black uppercase tracking-wider ${hasError ? 'text-rose-700' : 'text-red-500'}`}>
+          {index}. Se não, justifique *
+        </label>
+        {hasError && (
+          <span className="text-[9px] font-black text-rose-600 uppercase tracking-wider animate-pulse">
+            Obrigatório detalhar
+          </span>
+        )}
+      </div>
       <textarea
         placeholder="Descreva detalhadamente a não conformidade para melhoria..."
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={2}
-        className="w-full text-xs font-semibold p-2.5 bg-slate-50 border border-slate-200 focus:border-red-400 rounded-md outline-none text-slate-800 transition-colors"
+        className={`w-full text-xs font-semibold p-2.5 rounded-md outline-none text-slate-800 transition-colors ${
+          hasError 
+            ? 'bg-white border-2 border-rose-400 focus:border-rose-600' 
+            : 'bg-slate-50 border border-slate-200 focus:border-red-400'
+        }`}
       />
     </motion.div>
   );

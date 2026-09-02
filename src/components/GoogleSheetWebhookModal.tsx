@@ -43,10 +43,12 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
     setTimeout(() => setCopied(false), 3000);
   };
 
-  const handleSaveUrls = () => {
-    setWebhookUrl('tracer_01', webhookUrls.tracer_01);
-    setWebhookUrl('tracer_02', webhookUrls.tracer_02);
-    setWebhookUrl('tracer_03', webhookUrls.tracer_03);
+  const handleSaveUrls = async () => {
+    await Promise.all([
+      setWebhookUrl('tracer_01', webhookUrls.tracer_01),
+      setWebhookUrl('tracer_02', webhookUrls.tracer_02),
+      setWebhookUrl('tracer_03', webhookUrls.tracer_03)
+    ]);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3500);
   };

@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, onSnapshot, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import {
   getMergedPatientAudits,
   getMergedSurgeryAudits,
@@ -29,6 +29,10 @@ export interface DataContextType {
 const DataContext = createContext<DataContextType | null>(null);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const firestorePatientRef = useRef<any[]>([]);
+  const firestoreSurgeryRef = useRef<any[]>([]);
+  const firestoreHandRef = useRef<any[]>([]);
+
   const [patientAudits, setPatientAudits] = useState<any[]>(() => getMergedPatientAudits());
   const [surgeryAudits, setSurgeryAudits] = useState<any[]>(() => getMergedSurgeryAudits());
   const [handAudits, setHandAudits] = useState<any[]>(() => getMergedHandAudits());
@@ -38,26 +42,31 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [version, setVersion] = useState(0);
 
-  const loadFromLocal = useCallback(() => {
-    setPatientAudits(getMergedPatientAudits());
-    setSurgeryAudits(getMergedSurgeryAudits());
-    setHandAudits(getMergedHandAudits());
+  // Stable recalculation merging both Firestore snapshots and local caches
+  const recalculateAll = useCallback(() => {
+    const pLocal = getMergedPatientAudits();
+    const sLocal = getMergedSurgeryAudits();
+    const hLocal = getMergedHandAudits();
+
+    setPatientAudits(deduplicateAudits([...firestorePatientRef.current, ...pLocal]));
+    setSurgeryAudits(deduplicateAudits([...firestoreSurgeryRef.current, ...sLocal]));
+    setHandAudits(deduplicateAudits([...firestoreHandRef.current, ...hLocal]));
     setLoading(false);
   }, []);
 
   const refreshAudits = useCallback(() => {
-    loadFromLocal();
+    recalculateAll();
     setVersion(v => v + 1);
-  }, [loadFromLocal]);
+  }, [recalculateAll]);
 
-  // Listen to local storage sync events
+  // Listen to local storage sync and quota events
   useEffect(() => {
     const handleLocalUpdate = () => {
-      loadFromLocal();
+      recalculateAll();
     };
     const handleQuota = () => {
       setIsQuotaExceeded(true);
-      loadFromLocal();
+      recalculateAll();
     };
 
     window.addEventListener('local-data-updated', handleLocalUpdate);
@@ -66,9 +75,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('local-data-updated', handleLocalUpdate);
       window.removeEventListener('firestore-quota-exceeded', handleQuota);
     };
-  }, [loadFromLocal]);
+  }, [recalculateAll]);
 
-  // Single centralized Firestore synchronization
+  // Centralized real-time Firestore synchronization
   useEffect(() => {
     let unsubHand: () => void = () => {};
     let unsubPatient: () => void = () => {};
@@ -89,7 +98,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       unsubHand = onSnapshot(qHand, (s) => {
         const deletedIds = getDeletedAuditIds();
-        const firestoreDocs = s.docs
+        firestoreHandRef.current = s.docs
           .map(d => {
             const data = d.data();
             const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
@@ -104,18 +113,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedHandAudits();
-        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
-        setHandAudits(combined);
+        setHandAudits(deduplicateAudits([...firestoreHandRef.current, ...localList]));
         checkDone();
       }, (err) => {
         console.warn('[DataContext] Falha na leitura T03 do Firestore:', err?.message || err);
-        loadFromLocal();
+        recalculateAll();
         checkDone();
       });
 
       unsubPatient = onSnapshot(qPatient, (s) => {
         const deletedIds = getDeletedAuditIds();
-        const firestoreDocs = s.docs
+        firestorePatientRef.current = s.docs
           .map(d => {
             const data = d.data();
             const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
@@ -130,18 +138,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedPatientAudits();
-        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
-        setPatientAudits(combined);
+        setPatientAudits(deduplicateAudits([...firestorePatientRef.current, ...localList]));
         checkDone();
       }, (err) => {
         console.warn('[DataContext] Falha na leitura T01 do Firestore:', err?.message || err);
-        loadFromLocal();
+        recalculateAll();
         checkDone();
       });
 
       unsubSurgery = onSnapshot(qSurgery, (s) => {
         const deletedIds = getDeletedAuditIds();
-        const firestoreDocs = s.docs
+        firestoreSurgeryRef.current = s.docs
           .map(d => {
             const data = d.data();
             const timestampStr = data.timestampStr || (data.timestamp && typeof data.timestamp.toDate === 'function' ? data.timestamp.toDate().toISOString() : (data.timestamp && data.timestamp.seconds ? new Date(data.timestamp.seconds * 1000).toISOString() : new Date().toISOString()));
@@ -156,17 +163,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .filter(d => !deletedIds.includes(d.id) && !d.id.startsWith('f_'));
         
         const localList = getMergedSurgeryAudits();
-        const combined = deduplicateAudits([...firestoreDocs, ...localList]);
-        setSurgeryAudits(combined);
+        setSurgeryAudits(deduplicateAudits([...firestoreSurgeryRef.current, ...localList]));
         checkDone();
       }, (err) => {
         console.warn('[DataContext] Falha na leitura T02 do Firestore:', err?.message || err);
-        loadFromLocal();
+        recalculateAll();
         checkDone();
       });
     } catch (e) {
       console.warn('[DataContext] Exceção na inicialização do Firestore:', e);
-      loadFromLocal();
+      recalculateAll();
     }
 
     return () => {
@@ -174,7 +180,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try { unsubPatient(); } catch (e) {}
       try { unsubSurgery(); } catch (e) {}
     };
-  }, [loadFromLocal, version]);
+  }, [recalculateAll, version]);
 
   const deleteAudit = useCallback(async (id: string, type: string, fullAuditData?: any) => {
     // 0. Locate existing audit details for full metadata matching
@@ -183,7 +189,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 1. Delete locally immediately
     deleteAuditFromLocal(id);
-    loadFromLocal();
+    firestorePatientRef.current = firestorePatientRef.current.filter((a: any) => a.id !== id);
+    firestoreSurgeryRef.current = firestoreSurgeryRef.current.filter((a: any) => a.id !== id);
+    firestoreHandRef.current = firestoreHandRef.current.filter((a: any) => a.id !== id);
+    recalculateAll();
 
     // 2. Try Firestore deletion asynchronously
     try {
@@ -209,12 +218,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (sheetErr) {
       console.warn('[DataContext] Erro ao excluir na planilha destino:', sheetErr);
     }
-  }, [loadFromLocal, handAudits, patientAudits, surgeryAudits]);
+  }, [recalculateAll, handAudits, patientAudits, surgeryAudits]);
 
   const updateAudit = useCallback(async (id: string, type: string, data: any) => {
     // 1. Update locally immediately
     updateAuditInLocal(id, data);
-    loadFromLocal();
+    recalculateAll();
 
     // 2. Try Firestore update asynchronously
     try {
@@ -223,12 +232,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e: any) {
       console.warn('[DataContext] Erro ao atualizar no Firestore:', e?.message || e);
     }
-  }, [loadFromLocal]);
+  }, [recalculateAll]);
 
   const saveAudit = useCallback(async (audit: any) => {
     // 1. Save locally immediately
     saveCustomLocalAudit(audit);
-    loadFromLocal();
+    recalculateAll();
 
     // 2. Try Firestore save asynchronously
     try {
@@ -241,7 +250,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e: any) {
       console.warn('[DataContext] Erro ao salvar no Firestore:', e?.message || e);
     }
-  }, [loadFromLocal]);
+  }, [recalculateAll]);
 
   const allAudits = useMemo(() => {
     return [...patientAudits, ...surgeryAudits, ...handAudits];
@@ -270,7 +279,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export function useAuditsData(): DataContextType {
   const context = useContext(DataContext);
   if (!context) {
-    // Fallback if rendered outside provider
     const p = getMergedPatientAudits();
     const s = getMergedSurgeryAudits();
     const h = getMergedHandAudits();

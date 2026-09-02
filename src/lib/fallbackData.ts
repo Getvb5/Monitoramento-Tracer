@@ -35,11 +35,6 @@ export function getAuditFingerprint(a: any): string {
   
   const unit = normalizeStr(a.unitId || a.hospitalId || a.unidadeId || a.unitName || '');
 
-  // 1. If the record has an ID, use it as primary key
-  if (a.id) {
-    return `${type}__${unit}__${a.id}`;
-  }
-
   const raw = a.rawData || (a.sourceRowHash ? (typeof a.sourceRowHash === 'object' ? a.sourceRowHash : (typeof a.sourceRowHash === 'string' ? (() => { try { return JSON.parse(a.sourceRowHash); } catch { return {}; } })() : {})) : {});
   
   const carimbo = normalizeStr(
@@ -69,7 +64,7 @@ export function deduplicateAudits(list: any[]): any[] {
   if (!Array.isArray(list)) return [];
   const deletedIds = getDeletedAuditIds();
   const idMap = new Map<string, any>();
-  const fpMap = new Map<string, any>();
+  const fpToIdMap = new Map<string, string>();
 
   for (const item of list) {
     if (!item || !item.id || item.id.startsWith('f_') || deletedIds.includes(item.id)) {
@@ -77,9 +72,11 @@ export function deduplicateAudits(list: any[]): any[] {
     }
 
     const fp = getAuditFingerprint(item);
-    
-    // Check if we already have this record by ID or by Fingerprint
-    let existing = idMap.get(item.id) || fpMap.get(fp);
+    const existingById = idMap.get(item.id);
+    const existingIdByFp = fp ? fpToIdMap.get(fp) : undefined;
+    const existingByFp = existingIdByFp ? idMap.get(existingIdByFp) : undefined;
+
+    const existing = existingById || existingByFp;
 
     if (existing) {
       const existingRawKeys = existing.rawData ? Object.keys(existing.rawData).length : 0;
@@ -98,18 +95,25 @@ export function deduplicateAudits(list: any[]): any[] {
       }
 
       const winner = keepItem ? item : existing;
-      idMap.set(item.id, winner);
-      if (existing.id && existing.id !== item.id) {
-        idMap.delete(existing.id);
+      const loser = keepItem ? existing : item;
+
+      // Ensure single ID mapping
+      if (loser.id && loser.id !== winner.id) {
+        idMap.delete(loser.id);
       }
-      fpMap.set(fp, winner);
+      idMap.set(winner.id, winner);
+      if (fp) {
+        fpToIdMap.set(fp, winner.id);
+      }
     } else {
       idMap.set(item.id, item);
-      fpMap.set(fp, item);
+      if (fp) {
+        fpToIdMap.set(fp, item.id);
+      }
     }
   }
 
-  return Array.from(fpMap.values());
+  return Array.from(idMap.values());
 }
 
 export function purgeSyntheticData() {
