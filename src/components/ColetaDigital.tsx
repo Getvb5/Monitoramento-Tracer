@@ -63,7 +63,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
     all: any[];
   }>({ my: [], unit: [], all: [] });
   const [profileError, setProfileError] = useState('');
-  const [deletingAudit, setDeletingAudit] = useState<{ id: string; type: string } | null>(null);
+  const [deletingAudit, setDeletingAudit] = useState<any | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
@@ -248,10 +248,22 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
     }
   };
 
-  const handleDeleteAudit = async (id: string, type: string) => {
+  const handleDeleteAudit = async (id: string, type: string, fullAuditData?: any) => {
     try {
-      // Find audit details before deletion for spreadsheet synchronization
-      const existingAudit = recentAudits.find(a => a.id === id);
+      // Find audit details safely before deletion for spreadsheet synchronization
+      const allAuditsList = [
+        ...(recentAudits.all || []),
+        ...(recentAudits.my || []),
+        ...(recentAudits.unit || [])
+      ];
+      const existingAudit = fullAuditData || allAuditsList.find(a => a.id === id);
+
+      // Optimistic UI update immediately
+      setRecentAudits(prev => ({
+        my: prev.my.filter(a => a.id !== id),
+        unit: prev.unit.filter(a => a.id !== id),
+        all: prev.all.filter(a => a.id !== id)
+      }));
 
       // 1. Delete from local database / local storage
       const { deleteAuditFromLocal } = await import('../lib/fallbackData');
@@ -259,20 +271,20 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       
       // 2. Delete from Firestore if it's not a temporary local ID
       if (id && !id.startsWith('local_')) {
-        const { doc, deleteDoc } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
-        
-        let colName = '';
-        if (type === 'T01') colName = 'audits_patient_id';
-        else if (type === 'T02') colName = 'audits_safe_surgery';
-        else if (type === 'T03') colName = 'audits_hand_hygiene';
-        
-        if (colName) {
-          try {
+        try {
+          const { doc, deleteDoc } = await import('firebase/firestore');
+          const { db } = await import('../lib/firebase');
+          
+          let colName = '';
+          if (type === 'T01') colName = 'audits_patient_id';
+          else if (type === 'T02') colName = 'audits_safe_surgery';
+          else if (type === 'T03') colName = 'audits_hand_hygiene';
+          
+          if (colName) {
             await deleteDoc(doc(db, colName, id));
-          } catch (firestoreErr) {
-            console.warn("Could not delete from Firestore (offline?), marking local copy as deleted:", firestoreErr);
           }
+        } catch (firestoreErr) {
+          console.warn("Could not delete from Firestore (offline?), marking local copy as deleted:", firestoreErr);
         }
       }
 
@@ -286,7 +298,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
           type,
           patientName: existingAudit?.patientName || existingAudit?.rawData?.['Nome do Paciente'] || existingAudit?.rawData?.['q4_paciente'] || '',
           unitName: existingAudit?.unitName || existingAudit?.unitId || existingAudit?.rawData?.['Unidade de Saúde'] || '',
-          timestamp: existingAudit?.timestamp || existingAudit?.date || existingAudit?.rawData?.['Carimbo de data/hora'] || '',
+          timestamp: existingAudit?.timestampStr || existingAudit?.timestamp || existingAudit?.date || existingAudit?.rawData?.['Carimbo de data/hora'] || '',
           rawData: existingAudit?.rawData || {}
         });
       } catch (sheetErr) {
@@ -298,12 +310,12 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
         setSelectedAudit(null);
       }
       
-      // 5. Reload lists
+      // 5. Reload lists and dispatch sync event
       loadRecentAudits();
       
       // Dispatch event to update other dashboard components
       window.dispatchEvent(new Event('local-data-updated'));
-      triggerToast("Coleta excluída do sistema e da planilha com sucesso!", "success");
+      triggerToast("Coleta excluída com sucesso!", "success");
     } catch (err) {
       console.error("Erro ao excluir coleta:", err);
       triggerToast("Não foi possível excluir a coleta.", "error");
@@ -981,7 +993,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                                   
                                   {(isAdmin || isMine) && (
                                     <button 
-                                      onClick={() => setDeletingAudit({ id: item.id, type: item.type })}
+                                      onClick={() => setDeletingAudit(item)}
                                       className="p-1 px-2.5 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white rounded-md transition-all text-[9.5px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-xs border border-rose-100"
                                       title="Excluir Coleta"
                                     >
@@ -1203,8 +1215,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                   
                   <button
                     onClick={() => {
-                      const item = selectedAudit;
-                      setDeletingAudit({ id: item.id, type: item.type });
+                      setDeletingAudit(selectedAudit);
                     }}
                     className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
                   >
@@ -1275,7 +1286,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                   </button>
                   <button
                     onClick={() => {
-                      handleDeleteAudit(deletingAudit.id, deletingAudit.type);
+                      handleDeleteAudit(deletingAudit.id, deletingAudit.type, deletingAudit);
                       setDeletingAudit(null);
                     }}
                     className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer shadow-sm shadow-red-200"
