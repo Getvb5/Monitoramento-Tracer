@@ -554,8 +554,20 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
     }
   };
 
-  const renderTripleToggle = (field: keyof typeof formData, label: string, conditionalFieldName?: keyof typeof formData, conditionalLabel?: string) => {
+  const renderTripleToggle = (
+    field: keyof typeof formData,
+    label: string,
+    conditionalFieldName?: keyof typeof formData,
+    conditionalLabel?: string,
+    triggerValue: 'Sim' | 'Não' = 'Não'
+  ) => {
     const value = formData[field];
+    const isTriggerMatch = conditionalLabel?.toLowerCase().includes('se sim')
+      ? value === 'Sim'
+      : triggerValue === 'Sim'
+      ? value === 'Sim'
+      : value === 'Não';
+
     return (
       <div className="space-y-3 p-4 bg-slate-50/50 rounded-xl border border-slate-100 transition-all hover:bg-slate-50">
         <label className="text-[10px] font-bold uppercase text-slate-500 tracking-wider block">{label}</label>
@@ -580,14 +592,14 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
           ))}
         </div>
 
-        {conditionalFieldName && value === 'Não' && (
+        {conditionalFieldName && isTriggerMatch && field !== 'q14_alergia' && (
           <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="space-y-1.5 mt-3">
             <span className="text-[9px] font-extrabold uppercase text-amber-600 tracking-widest block">
-              {conditionalLabel || 'Se não, justifique:'}
+              {conditionalLabel || (value === 'Sim' ? 'Se sim, justifique:' : 'Se não, justifique:')}
             </span>
             <input
               type="text"
-              value={formData[conditionalFieldName] as string}
+              value={(formData[conditionalFieldName] as string) || ''}
               onChange={(e) => handleFieldChange(conditionalFieldName, e.target.value)}
               placeholder="Digite a justificativa detalhada..."
               className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-medium"
