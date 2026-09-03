@@ -3,6 +3,7 @@ import { db } from '../../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_03_UNITS } from '../../lib/utils';
+import { formatBrDate, formatBrTime, formatBrTimestamp } from '../../lib/googleSheetWebhook';
 import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Pill, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -122,8 +123,28 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
         }
       }
 
+      // Flexible reader that checks both canonical and numbered keys
+      const getVal = (...keys: string[]): string => {
+        for (const k of keys) {
+          if (rData[k] !== undefined && rData[k] !== null && String(rData[k]).trim() !== '') {
+            return String(rData[k]);
+          }
+        }
+        for (const k of keys) {
+          const normK = k.replace(/^[0-9]+[\.\-\s]+/g, '').toLowerCase().replace(/[:\?\*\s]/g, '');
+          for (const rk in rData) {
+            const normRk = rk.replace(/^[0-9]+[\.\-\s]+/g, '').toLowerCase().replace(/[:\?\*\s]/g, '');
+            if (normK === normRk && rData[rk]) {
+              return String(rData[rk]);
+            }
+          }
+        }
+        return '';
+      };
+
       // Pre-fill hospital
-      const matchedUnit = HEALTH_UNITS.find(u => u.name === rData['02- Nome do Hospital/Maternidade:'] || u.name === rData['02- Nome do Hospital/Maternidade']);
+      const unitNameVal = getVal('Nome do Hospital/Maternidade:', 'Nome do Hospital/Maternidade', '02- Nome do Hospital/Maternidade:');
+      const matchedUnit = HEALTH_UNITS.find(u => u.name === unitNameVal);
       if (matchedUnit) {
         setUnitId(matchedUnit.id);
       } else if (editingAudit.unitId) {
@@ -131,73 +152,73 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
       }
 
       setFormData({
-        q1_hospital: rData['02- Nome do Hospital/Maternidade:'] || rData['02- Nome do Hospital/Maternidade'] || '',
-        q2_data: rData['03- Data do Tracer:'] || rData['03- Data do Tracer'] || getTodayDateStr(),
-        q3_horario: rData['04- Horário do Início do Tracer:'] || rData['04- Horário do Início do Tracer'] || getCurrentTimeStr(),
-        q4_setor: rData['05- Setor Auditado:'] || rData['05- Setor Auditado'] || '',
-        q5_auditor: rData['06- Nome Completo do Auditor:'] || rData['06- Nome Completo do Auditor'] || '',
-        q6_paciente: rData['07- Nome Completo do Paciente:'] || rData['07- Nome Completo do Paciente'] || rData['07- Nome do paciente:'] || rData['07- Nome do paciente'] || '',
-        q7_prontuario: rData['08- Nº do Prontuário do Paciente:'] || rData['08- Nº do Prontuário do Paciente'] || '',
+        q1_hospital: unitNameVal,
+        q2_data: getVal('Data do Tracer:', 'Data do Tracer', '03- Data do Tracer:', 'Data') || getTodayDateStr(),
+        q3_horario: getVal('Horário do Início do Tracer:', 'Horário do Início do Tracer', '04- Horário do Início do Tracer:', 'Horário') || getCurrentTimeStr(),
+        q4_setor: getVal('Setor Auditado:', 'Setor Auditado', '05- Setor Auditado:', 'Setor'),
+        q5_auditor: getVal('Nome Completo do Auditor:', 'Nome Completo do Auditor', '06- Nome Completo do Auditor:', 'Auditor'),
+        q6_paciente: getVal('Nome Completo do Paciente:', 'Nome Completo do Paciente', '07- Nome Completo do Paciente:', 'Nome do paciente:', '07- Nome do paciente:'),
+        q7_prontuario: getVal('Nº do Prontuário do Paciente:', 'Nº do Prontuário do Paciente', '08- Nº do Prontuário do Paciente:'),
 
-        q8_pulseira_branca: rData['09- Paciente identificado com pulseira branca?'] || '',
-        q9_pulseira_branca_just: rData['10- Se não, justifique:'] || rData['10- Se não, justifique: '] || '',
-        q10_pulseira_legivel: rData['11- A pulseira de identificação está legível?'] || '',
-        q11_pulseira_legivel_just: rData['12- Se não, justifique:'] || rData['12- Se não, justifique: '] || '',
-        q12_pulseira_preenchida: rData['13- A pulseira de identificação preenchida adequadamente?'] || '',
-        q13_pulseira_preenchida_just: rData['14- Se não, justifique:'] || rData['14- Se não, justifique: '] || '',
-        q14_alergia: rData['15- O paciente tem alergia alimentar/medicamentosa?'] || '',
-        q15_alergia_sinalizada: rData['16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?'] || '',
-        q16_alergia_just: rData['17- Se não, justifique:'] || rData['17- Se não, justifique: '] || '',
+        q8_pulseira_branca: getVal('Paciente identificado com pulseira branca?', '09- Paciente identificado com pulseira branca?'),
+        q9_pulseira_branca_just: getVal('Se não, justifique:', '10- Se não, justifique:'),
+        q10_pulseira_legivel: getVal('A pulseira de identificação está legível?', '11- A pulseira de identificação está legível?'),
+        q11_pulseira_legivel_just: getVal('Se não, justifique:_1', '12- Se não, justifique:'),
+        q12_pulseira_preenchida: getVal('A pulseira de identificação preenchida adequadamente?', '13- A pulseira de identificação preenchida adequadamente?'),
+        q13_pulseira_preenchida_just: getVal('Se não, justifique:_2', '14- Se não, justifique:'),
+        q14_alergia: getVal('O paciente tem alergia alimentar/medicamentosa?', '15- O paciente tem alergia alimentar/medicamentosa?'),
+        q15_alergia_sinalizada: getVal('Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?', '16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?'),
+        q16_alergia_just: getVal('Se não, justifique:_3', '17- Se não, justifique:'),
 
-        q17_orientacao_paciente: rData['18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?'] || '',
-        q18_higienizacao_maos: rData['19- Houve higienização das mãos imediatamente antes da administração da medicação?'] || rData['19- Houve higienização das mãos imediatamente antes da administração da medicação? '] || '',
-        q19_higienizacao_maos_just: rData['20- Se não, justifique:'] || rData['20- Se não, justifique: '] || '',
-        q20_acesso_venoso: rData['21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?'] || '',
-        q21_acesso_venoso_just: rData['22- Se não, justifique:'] || rData['22- Se não, justifique: '] || '',
-        q22_conferencia_pulseira: rData['23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?'] || '',
-        q23_conferencia_pulseira_just: rData['24- Se não, justifique:'] || rData['24- Se não, justifique: '] || '',
-        q24_conferencia_prescricao: rData['25- Houve conferência do medicamento administrado com a prescrição?'] || '',
-        q25_dupla_checagem: rData['26- Realizada dupla checagem no momento de administração da MAV?'] || '',
-        q26_dupla_checagem_just: rData['27- Se não, justifique:'] || rData['27- Se não, justifique: '] || '',
-        q27_rotulo_obrigatorios: rData['28- O rótulo de medicação está com todos os identificadores obrigatórios?'] || '',
-        q28_rotulo_obrigatorios_just: rData['29- Se não, justifique:'] || rData['29- Se não, justifique: '] || '',
+        q17_orientacao_paciente: getVal('Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?', '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?'),
+        q18_higienizacao_maos: getVal('Houve higienização das mãos imediatamente antes da administração da medicação?', '19- Houve higienização das mãos imediatamente antes da administração da medicação?'),
+        q19_higienizacao_maos_just: getVal('Se não, justifique:_4', '20- Se não, justifique:'),
+        q20_acesso_venoso: getVal('Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?', '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?'),
+        q21_acesso_venoso_just: getVal('Se não, justifique:_5', '22- Se não, justifique:'),
+        q22_conferencia_pulseira: getVal('No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?', '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?'),
+        q23_conferencia_pulseira_just: getVal('Se não, justifique:_6', '24- Se não, justifique:'),
+        q24_conferencia_prescricao: getVal('Houve conferência do medicamento administrado com a prescrição?', '25- Houve conferência do medicamento administrado com a prescrição?'),
+        q25_dupla_checagem: getVal('Realizada dupla checagem no momento de administração da MAV?', '26- Realizada dupla checagem no momento de administração da MAV?'),
+        q26_dupla_checagem_just: getVal('Se não, justifique:_7', '27- Se não, justifique:'),
+        q27_rotulo_obrigatorios: getVal('O rótulo de medicação está com todos os identificadores obrigatórios?', '28- O rótulo de medicação está com todos os identificadores obrigatórios?'),
+        q28_rotulo_obrigatorios_just: getVal('Se não, justifique:_8', '29- Se não, justifique:'),
 
-        q29_assinatura_medico: rData['30- Prescrição com assinatura do médico?'] || '',
-        q30_assinatura_medico_just: rData['31- Se não, justifique:'] || rData['31- Se não, justifique: '] || '',
-        q31_assinatura_enfermeiro: rData['32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?'] || '',
-        q32_assinatura_enfermeiro_just: rData['33- Se não, justifique:'] || rData['33- Se não, justifique: '] || '',
-        q33_hora_correta: rData['34- A hora da administração da medicação é a mesma da prescrição?'] || '',
-        q34_hora_correta_just: rData['35- Se não, justifique:'] || rData['35- Se não, justifique: '] || '',
-        q35_sem_abreviaturas: rData['36- A prescrição está SEM USO DE ABREVIATURAS?'] || '',
-        q36_diferenciar_semelhantes: rData['37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)'] || '',
-        q37_diferenciar_semelhantes_just: rData['38- Se não, justifique:'] || rData['38- Se não, justifique: '] || '',
-        q38_registro_alergias: rData['39- Há registros das alergias medicamentosas na prescrição?'] || '',
-        q39_registro_alergias_just: rData['40- Se não, justifique:'] || rData['40- Se não, justifique: '] || '',
-        q40_duracao_especificada: rData['41- A duração do tratamento está especificada?'] || '',
-        q41_se_necessario_seguranca: rData['42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?'] || '',
-        q42_se_necessario_seguranca_just: rData['43- Se não, justifique:'] || rData['43- Se não, justifique: '] || '',
-        q43_diluente_prescrito: rData['44- O diluente da medicação está prescrito?'] || '',
-        q44_velocidade_prescrita: rData['45- A velocidade de infusão está prescrita?'] || '',
-        q45_velocidade_prescrita_just: rData['46- Se não, justifique:'] || rData['46- Se não, justifique: '] || '',
-        q46_via_prescrita: rData['47- A via de administração está prescrita?'] || '',
-        q47_via_prescrita_just: rData['48- Se não, justifique:'] || rData['48- Se não, justifique: '] || '',
+        q29_assinatura_medico: getVal('Prescrição com assinatura do médico?', '30- Prescrição com assinatura do médico?'),
+        q30_assinatura_medico_just: getVal('Se não, justifique:_9', '31- Se não, justifique:'),
+        q31_assinatura_enfermeiro: getVal('Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?', '32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?'),
+        q32_assinatura_enfermeiro_just: getVal('Se não, justifique:_10', '33- Se não, justifique:'),
+        q33_hora_correta: getVal('A hora da administração da medicação é a mesma da prescrição?', '34- A hora da administração da medicação é a mesma da prescrição?'),
+        q34_hora_correta_just: getVal('Se não, justifique:_11', '35- Se não, justifique:'),
+        q35_sem_abreviaturas: getVal('A prescrição está SEM USO DE ABREVIATURAS?', '36- A prescrição está SEM USO DE ABREVIATURAS?'),
+        q36_diferenciar_semelhantes: getVal('Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)', '37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)'),
+        q37_diferenciar_semelhantes_just: getVal('Se não, justifique:_12', '38- Se não, justifique:'),
+        q38_registro_alergias: getVal('Há registros das alergias medicamentosas na prescrição?', '39- Há registros das alergias medicamentosas na prescrição?'),
+        q39_registro_alergias_just: getVal('Se não, justifique:_13', '40- Se não, justifique:'),
+        q40_duracao_especificada: getVal('A duração do tratamento está especificada?', '41- A duração do tratamento está especificada?'),
+        q41_se_necessario_seguranca: getVal('Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?', '42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?'),
+        q42_se_necessario_seguranca_just: getVal('Se não, justifique:_14', '43- Se não, justifique:'),
+        q43_diluente_prescrito: getVal('O diluente da medicação está prescrito?', '44- O diluente da medicação está prescrito?'),
+        q44_velocidade_prescrita: getVal('A velocidade de infusão está prescrita?', '45- A velocidade de infusão está prescrita?'),
+        q45_velocidade_prescrita_just: getVal('Se não, justifique:_15', '46- Se não, justifique:'),
+        q46_via_prescrita: getVal('A via de administração está prescrita?', '47- A via de administração está prescrita?'),
+        q47_via_prescrita_just: getVal('Se não, justifique:_16', '48- Se não, justifique:'),
 
-        q48_nao_administrada: rData['49- Alguma medicação não administrada conforme prescrição?'] || '',
-        q49_nao_administrada_just: rData['50- Se não, justifique:'] || rData['50- Se não, justifique: '] || '',
-        q50_dose_checada: rData['51- A dose administrada foi checada de forma legível após a administração da medicação?'] || '',
-        q51_dose_checada_just: rData['52- Se não, justifique:'] || rData['52- Se não, justifique: '] || '',
-        q52_mav_acesso_restrito: rData['53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?'] || '',
-        q53_mav_acesso_restrito_just: rData['54- Se não, justifique:'] || rData['54- Se não, justifique: '] || '',
-        q54_lista_mav_disponivel: rData['55- Lista de medicações de alta vigilância (MAV) disponível no setor?'] || '',
-        q55_lista_mav_disponivel_just: rData['56- Se não, justifique:'] || rData['56- Se não, justifique: '] || '',
-        q56_temperatura_refrigeracao: rData['57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?'] || '',
-        q57_temperatura_refrigeracao_just: rData['58- Se não, justifique:'] || rData['58- Se não, justifique: '] || '',
-        q58_lista_refrigerados_disponivel: rData['59- Lista de medicações refrigeradas disponível no setor?'] || '',
-        q59_lista_refrigerados_disponivel_just: rData['60- Se não, justifique:'] || rData['60- Se não, justifique: '] || '',
-        q60_medicacao_casa_registrada: rData['61- Medicação trazida de casa registrada na prescrição del paciente?'] || rData['61- Medicação trazida de casa registrada na prescrição do paciente?'] || '',
-        q61_medicacao_casa_registrada_just: rData['62- Se não, justifique:'] || rData['62- Se não, justifique: '] || '',
-        q62_amostra_gratis_detectada: rData['63- Alguma amostra grátis detectada no setor?'] || '',
-        q63_amostra_gratis_detectada_just: rData['64- Se sim, justifique:'] || rData['64- Se sim, justifique: '] || '',
+        q48_nao_administrada: getVal('Alguma medicação não administrada conforme prescrição?', '49- Alguma medicação não administrada conforme prescrição?'),
+        q49_nao_administrada_just: getVal('Se não, justifique:_17', '50- Se não, justifique:'),
+        q50_dose_checada: getVal('A dose administrada foi checada de forma legível após a administração da medicação?', '51- A dose administrada foi checada de forma legível após a administração da medicação?'),
+        q51_dose_checada_just: getVal('Se não, justifique:_18', '52- Se não, justifique:'),
+        q52_mav_acesso_restrito: getVal('Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?', '53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?'),
+        q53_mav_acesso_restrito_just: getVal('Se não, justifique:_19', '54- Se não, justifique:'),
+        q54_lista_mav_disponivel: getVal('Lista de medicações de alta vigilância (MAV) disponível no setor?', '55- Lista de medicações de alta vigilância (MAV) disponível no setor?'),
+        q55_lista_mav_disponivel_just: getVal('Se não, justifique:_20', '56- Se não, justifique:'),
+        q56_temperatura_refrigeracao: getVal('Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?', '57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?'),
+        q57_temperatura_refrigeracao_just: getVal('Se não, justifique:_21', '58- Se não, justifique:'),
+        q58_lista_refrigerados_disponivel: getVal('Lista de medicações refrigeradas disponível no setor?', '59- Lista de medicações refrigeradas disponível no setor?'),
+        q59_lista_refrigerados_disponivel_just: getVal('Se não, justifique:_22', '60- Se não, justifique:'),
+        q60_medicacao_casa_registrada: getVal('Medicação trazida de casa registrada na prescrição do paciente?', '61- Medicação trazida de casa registrada na prescrição do paciente?', 'Medicação trazida de casa registrada na prescrição del paciente?', '61- Medicação trazida de casa registrada na prescrição del paciente?'),
+        q61_medicacao_casa_registrada_just: getVal('Se não, justifique:_23', '62- Se não, justifique:'),
+        q62_amostra_gratis_detectada: getVal('Alguma amostra grátis detectada no setor?', '63- Alguma amostra grátis detectada no setor?'),
+        q63_amostra_gratis_detectada_just: getVal('Se sim, justifique:', '64- Se sim, justifique:'),
       });
     } else {
       const effectiveUnit = !isAdmin && userUnit ? userUnit : null;
@@ -413,76 +434,194 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
     setError('');
 
     try {
-      // Format unit and construct final rawData dictionary matching utility arrays
+      // Format unit and construct final rawData dictionary matching utility arrays & Google Sheet columns
       const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
       const rawData: Record<string, string> = {
+        'Carimbo de data/hora': formatBrTimestamp(new Date()),
+        'Nome do Hospital/Maternidade': unitName,
+        'Nome do Hospital/Maternidade:': unitName,
         '02- Nome do Hospital/Maternidade:': unitName,
+        'Data do Tracer:': formatBrDate(formData.q2_data),
         '03- Data do Tracer:': formData.q2_data,
+        'Horário do Início do Tracer:': formatBrTime(formData.q3_horario),
         '04- Horário do Início do Tracer:': formData.q3_horario,
+        'Setor Auditado:': formData.q4_setor,
         '05- Setor Auditado:': formData.q4_setor,
+        'Nome Completo do Auditor:': formData.q5_auditor,
         '06- Nome Completo do Auditor:': formData.q5_auditor,
+        'Nome Completo do Paciente:': formData.q6_paciente,
+        'Nome do paciente:': formData.q6_paciente,
         '07- Nome Completo do Paciente:': formData.q6_paciente,
+        'Nº do Prontuário do Paciente:': formData.q7_prontuario,
         '08- Nº do Prontuário do Paciente:': formData.q7_prontuario,
 
+        'Paciente identificado com pulseira branca?': formData.q8_pulseira_branca,
         '09- Paciente identificado com pulseira branca?': formData.q8_pulseira_branca,
-        ...(formData.q8_pulseira_branca === 'Não' && { '10- Se não, justifique:': formData.q9_pulseira_branca_just }),
+        ...(formData.q8_pulseira_branca === 'Não' && { 
+          'Se não, justifique:': formData.q9_pulseira_branca_just,
+          '10- Se não, justifique:': formData.q9_pulseira_branca_just 
+        }),
+        'A pulseira de identificação está legível?': formData.q10_pulseira_legivel,
         '11- A pulseira de identificação está legível?': formData.q10_pulseira_legivel,
-        ...(formData.q10_pulseira_legivel === 'Não' && { '12- Se não, justifique:': formData.q11_pulseira_legivel_just }),
+        ...(formData.q10_pulseira_legivel === 'Não' && { 
+          'Se não, justifique:_1': formData.q11_pulseira_legivel_just,
+          '12- Se não, justifique:': formData.q11_pulseira_legivel_just 
+        }),
+        'A pulseira de identificação preenchida adequadamente?': formData.q12_pulseira_preenchida,
         '13- A pulseira de identificação preenchida adequadamente?': formData.q12_pulseira_preenchida,
-        ...(formData.q12_pulseira_preenchida === 'Não' && { '14- Se não, justifique:': formData.q13_pulseira_preenchida_just }),
+        ...(formData.q12_pulseira_preenchida === 'Não' && { 
+          'Se não, justifique:_2': formData.q13_pulseira_preenchida_just,
+          '14- Se não, justifique:': formData.q13_pulseira_preenchida_just 
+        }),
+        'O paciente tem alergia alimentar/medicamentosa?': formData.q14_alergia,
         '15- O paciente tem alergia alimentar/medicamentosa?': formData.q14_alergia,
-        ...(formData.q14_alergia === 'Sim' && { '16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q15_alergia_sinalizada }),
-        ...(formData.q15_alergia_sinalizada === 'Não' && { '17- Se não, justifique:': formData.q16_alergia_just }),
+        ...(formData.q14_alergia === 'Sim' && { 
+          'Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q15_alergia_sinalizada,
+          '16- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q15_alergia_sinalizada 
+        }),
+        ...(formData.q15_alergia_sinalizada === 'Não' && { 
+          'Se não, justifique:_3': formData.q16_alergia_just,
+          '17- Se não, justifique:': formData.q16_alergia_just 
+        }),
 
+        'Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?': formData.q17_orientacao_paciente,
         '18- Foram fornecidas orientações ao paciente sobre o medicamento administrado e possíveis efeitos?': formData.q17_orientacao_paciente,
+        'Houve higienização das mãos imediatamente antes da administração da medicação?': formData.q18_higienizacao_maos,
         '19- Houve higienização das mãos imediatamente antes da administração da medicação?': formData.q18_higienizacao_maos,
-        ...(formData.q18_higienizacao_maos === 'Não' && { '20- Se não, justifique:': formData.q19_higienizacao_maos_just }),
+        ...(formData.q18_higienizacao_maos === 'Não' && { 
+          'Se não, justifique:_4': formData.q19_higienizacao_maos_just,
+          '20- Se não, justifique:': formData.q19_higienizacao_maos_just 
+        }),
+        'Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q20_acesso_venoso,
         '21- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q20_acesso_venoso,
-        ...(formData.q20_acesso_venoso === 'Não' && { '22- Se não, justifique:': formData.q21_acesso_venoso_just }),
+        ...(formData.q20_acesso_venoso === 'Não' && { 
+          'Se não, justifique:_5': formData.q21_acesso_venoso_just,
+          '22- Se não, justifique:': formData.q21_acesso_venoso_just 
+        }),
+        'No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?': formData.q22_conferencia_pulseira,
         '23- No momento da administração da medicação foi conferida a identificação do paciente com a pulseira?': formData.q22_conferencia_pulseira,
-        ...(formData.q22_conferencia_pulseira === 'Não' && { '24- Se não, justifique:': formData.q23_conferencia_pulseira_just }),
+        ...(formData.q22_conferencia_pulseira === 'Não' && { 
+          'Se não, justifique:_6': formData.q23_conferencia_pulseira_just,
+          '24- Se não, justifique:': formData.q23_conferencia_pulseira_just 
+        }),
+        'Houve conferência do medicamento administrado com a prescrição?': formData.q24_conferencia_prescricao,
         '25- Houve conferência do medicamento administrado com a prescrição?': formData.q24_conferencia_prescricao,
+        'Realizada dupla checagem no momento de administração da MAV?': formData.q25_dupla_checagem,
         '26- Realizada dupla checagem no momento de administração da MAV?': formData.q25_dupla_checagem,
-        ...(formData.q25_dupla_checagem === 'Não' && { '27- Se não, justifique:': formData.q26_dupla_checagem_just }),
+        ...(formData.q25_dupla_checagem === 'Não' && { 
+          'Se não, justifique:_7': formData.q26_dupla_checagem_just,
+          '27- Se não, justifique:': formData.q26_dupla_checagem_just 
+        }),
+        'O rótulo de medicação está com todos os identificadores obrigatórios?': formData.q27_rotulo_obrigatorios,
         '28- O rótulo de medicação está com todos os identificadores obrigatórios?': formData.q27_rotulo_obrigatorios,
-        ...(formData.q27_rotulo_obrigatorios === 'Não' && { '29- Se não, justifique:': formData.q28_rotulo_obrigatorios_just }),
+        ...(formData.q27_rotulo_obrigatorios === 'Não' && { 
+          'Se não, justifique:_8': formData.q28_rotulo_obrigatorios_just,
+          '29- Se não, justifique:': formData.q28_rotulo_obrigatorios_just 
+        }),
 
+        'Prescrição com assinatura do médico?': formData.q29_assinatura_medico,
         '30- Prescrição com assinatura do médico?': formData.q29_assinatura_medico,
-        ...(formData.q29_assinatura_medico === 'Não' && { '31- Se não, justifique:': formData.q30_assinatura_medico_just }),
+        ...(formData.q29_assinatura_medico === 'Não' && { 
+          'Se não, justifique:_9': formData.q30_assinatura_medico_just,
+          '31- Se não, justifique:': formData.q30_assinatura_medico_just 
+        }),
+        'Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?': formData.q31_assinatura_enfermeiro,
         '32- Prescrição com assinatura do Enfermeiro que fez abertura dos horários de medicação?': formData.q31_assinatura_enfermeiro,
-        ...(formData.q31_assinatura_enfermeiro === 'Não' && { '33- Se não, justifique:': formData.q32_assinatura_enfermeiro_just }),
+        ...(formData.q31_assinatura_enfermeiro === 'Não' && { 
+          'Se não, justifique:_10': formData.q32_assinatura_enfermeiro_just,
+          '33- Se não, justifique:': formData.q32_assinatura_enfermeiro_just 
+        }),
+        'A hora da administração da medicação é a mesma da prescrição?': formData.q33_hora_correta,
         '34- A hora da administração da medicação é a mesma da prescrição?': formData.q33_hora_correta,
-        ...(formData.q33_hora_correta === 'Não' && { '35- Se não, justifique:': formData.q34_hora_correta_just }),
+        ...(formData.q33_hora_correta === 'Não' && { 
+          'Se não, justifique:_11': formData.q34_hora_correta_just,
+          '35- Se não, justifique:': formData.q34_hora_correta_just 
+        }),
+        'A prescrição está SEM USO DE ABREVIATURAS?': formData.q35_sem_abreviaturas,
         '36- A prescrição está SEM USO DE ABREVIATURAS?': formData.q35_sem_abreviaturas,
+        'Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)': formData.q36_diferenciar_semelhantes,
         '37- Existe estratégia para diferenciar nomes semelhantes de medicação? (ex: DOPAmina e DOBUTAmina)': formData.q36_diferenciar_semelhantes,
-        ...(formData.q36_diferenciar_semelhantes === 'Não' && { '38- Se não, justifique:': formData.q37_diferenciar_semelhantes_just }),
+        ...(formData.q36_diferenciar_semelhantes === 'Não' && { 
+          'Se não, justifique:_12': formData.q37_diferenciar_semelhantes_just,
+          '38- Se não, justifique:': formData.q37_diferenciar_semelhantes_just 
+        }),
+        'Há registros das alergias medicamentosas na prescrição?': formData.q38_registro_alergias,
         '39- Há registros das alergias medicamentosas na prescrição?': formData.q38_registro_alergias,
-        ...(formData.q38_registro_alergias === 'Não' && { '40- Se não, justifique:': formData.q39_registro_alergias_just }),
+        ...(formData.q38_registro_alergias === 'Não' && { 
+          'Se não, justifique:_13': formData.q39_registro_alergias_just,
+          '40- Se não, justifique:': formData.q39_registro_alergias_just 
+        }),
+        'A duração do tratamento está especificada?': formData.q40_duracao_especificada,
         '41- A duração do tratamento está especificada?': formData.q40_duracao_especificada,
+        'Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?': formData.q41_se_necessario_seguranca,
         '42- Medicações de uso SE NECESSÁRIO contém informações de segurança (dose, posologia, indicação de situações em que podem ser usadas)?': formData.q41_se_necessario_seguranca,
-        ...(formData.q41_se_necessario_seguranca === 'Não' && { '43- Se não, justifique:': formData.q42_se_necessario_seguranca_just }),
+        ...(formData.q41_se_necessario_seguranca === 'Não' && { 
+          'Se não, justifique:_14': formData.q42_se_necessario_seguranca_just,
+          '43- Se não, justifique:': formData.q42_se_necessario_seguranca_just 
+        }),
+        'O diluente da medicação está prescrito?': formData.q43_diluente_prescrito,
         '44- O diluente da medicação está prescrito?': formData.q43_diluente_prescrito,
+        'A velocidade de infusão está prescrita?': formData.q44_velocidade_prescrita,
         '45- A velocidade de infusão está prescrita?': formData.q44_velocidade_prescrita,
-        ...(formData.q44_velocidade_prescrita === 'Não' && { '46- Se não, justifique:': formData.q45_velocidade_prescrita_just }),
+        ...(formData.q44_velocidade_prescrita === 'Não' && { 
+          'Se não, justifique:_15': formData.q45_velocidade_prescrita_just,
+          '46- Se não, justifique:': formData.q45_velocidade_prescrita_just 
+        }),
+        'A via de administração está prescrita?': formData.q46_via_prescrita,
         '47- A via de administração está prescrita?': formData.q46_via_prescrita,
-        ...(formData.q46_via_prescrita === 'Não' && { '48- Se não, justifique:': formData.q47_via_prescrita_just }),
+        ...(formData.q46_via_prescrita === 'Não' && { 
+          'Se não, justifique:_16': formData.q47_via_prescrita_just,
+          '48- Se não, justifique:': formData.q47_via_prescrita_just 
+        }),
 
+        'Alguma medicação não administrada conforme prescrição?': formData.q48_nao_administrada,
         '49- Alguma medicação não administrada conforme prescrição?': formData.q48_nao_administrada,
-        ...(formData.q48_nao_administrada === 'Não' && { '50- Se não, justifique:': formData.q49_nao_administrada_just }),
+        ...(formData.q48_nao_administrada === 'Não' && { 
+          'Se não, justifique:_17': formData.q49_nao_administrada_just,
+          '50- Se não, justifique:': formData.q49_nao_administrada_just 
+        }),
+        'A dose administrada foi checada de forma legível após a administração da medicação?': formData.q50_dose_checada,
         '51- A dose administrada foi checada de forma legível após a administração da medicação?': formData.q50_dose_checada,
-        ...(formData.q50_dose_checada === 'Não' && { '52- Se não, justifique:': formData.q51_dose_checada_just }),
+        ...(formData.q50_dose_checada === 'Não' && { 
+          'Se não, justifique:_18': formData.q51_dose_checada_just,
+          '52- Se não, justifique:': formData.q51_dose_checada_just 
+        }),
+        'Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?': formData.q52_mav_acesso_restrito,
         '53- Medicamentos de alta vigilância e controlados estão armazenados em armários com acesso restrito?': formData.q52_mav_acesso_restrito,
-        ...(formData.q52_mav_acesso_restrito === 'Não' && { '54- Se não, justifique:': formData.q53_mav_acesso_restrito_just }),
+        ...(formData.q52_mav_acesso_restrito === 'Não' && { 
+          'Se não, justifique:_19': formData.q53_mav_acesso_restrito_just,
+          '54- Se não, justifique:': formData.q53_mav_acesso_restrito_just 
+        }),
+        'Lista de medicações de alta vigilância (MAV) disponível no setor?': formData.q54_lista_mav_disponivel,
         '55- Lista de medicações de alta vigilância (MAV) disponível no setor?': formData.q54_lista_mav_disponivel,
-        ...(formData.q54_lista_mav_disponivel === 'Não' && { '56- Se não, justifique:': formData.q55_lista_mav_disponivel_just }),
+        ...(formData.q54_lista_mav_disponivel === 'Não' && { 
+          'Se não, justifique:_20': formData.q55_lista_mav_disponivel_just,
+          '56- Se não, justifique:': formData.q55_lista_mav_disponivel_just 
+        }),
+        'Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?': formData.q56_temperatura_refrigeracao,
         '57- Temperatura de refrigeração das medicações entre 2 e 8ºC no termohigrômetro?': formData.q56_temperatura_refrigeracao,
-        ...(formData.q56_temperatura_refrigeracao === 'Não' && { '58- Se não, justifique:': formData.q57_temperatura_refrigeracao_just }),
+        ...(formData.q56_temperatura_refrigeracao === 'Não' && { 
+          'Se não, justifique:_21': formData.q57_temperatura_refrigeracao_just,
+          '58- Se não, justifique:': formData.q57_temperatura_refrigeracao_just 
+        }),
+        'Lista de medicações refrigeradas disponível no setor?': formData.q58_lista_refrigerados_disponivel,
         '59- Lista de medicações refrigeradas disponível no setor?': formData.q58_lista_refrigerados_disponivel,
-        ...(formData.q58_lista_refrigerados_disponivel === 'Não' && { '60- Se não, justifique:': formData.q59_lista_refrigerados_disponivel_just }),
+        ...(formData.q58_lista_refrigerados_disponivel === 'Não' && { 
+          'Se não, justifique:_22': formData.q59_lista_refrigerados_disponivel_just,
+          '60- Se não, justifique:': formData.q59_lista_refrigerados_disponivel_just 
+        }),
+        'Medicação trazida de casa registrada na prescrição do paciente?': formData.q60_medicacao_casa_registrada,
         '61- Medicação trazida de casa registrada na prescrição do paciente?': formData.q60_medicacao_casa_registrada,
-        ...(formData.q60_medicacao_casa_registrada === 'Não' && { '62- Se não, justifique:': formData.q61_medicacao_casa_registrada_just }),
+        ...(formData.q60_medicacao_casa_registrada === 'Não' && { 
+          'Se não, justifique:_23': formData.q61_medicacao_casa_registrada_just,
+          '62- Se não, justifique:': formData.q61_medicacao_casa_registrada_just 
+        }),
+        'Alguma amostra grátis detectada no setor?': formData.q62_amostra_gratis_detectada,
         '63- Alguma amostra grátis detectada no setor?': formData.q62_amostra_gratis_detectada,
-        ...(formData.q62_amostra_gratis_detectada === 'Sim' && { '64- Se sim, justifique:': formData.q63_amostra_gratis_detectada_just }),
+        ...(formData.q62_amostra_gratis_detectada === 'Sim' && { 
+          'Se sim, justifique:': formData.q63_amostra_gratis_detectada_just,
+          '64- Se sim, justifique:': formData.q63_amostra_gratis_detectada_just 
+        }),
       };
 
       // Compliance is strictly tied to Hand Hygiene check (Yes)
@@ -564,7 +703,12 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
           type: 'T03',
           rawData,
           patientName,
-          unitName
+          unitName,
+          auditorName,
+          medicalRecordNumber,
+          tracerDate: formData.q2_data,
+          tracerTime: formData.q3_horario,
+          sector
         });
       } catch (sheetErr) {
         console.warn('[HandHygieneForm] Google Sheet webhook notice:', sheetErr);

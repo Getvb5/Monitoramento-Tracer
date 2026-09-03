@@ -12,6 +12,44 @@ export interface SheetWebhookConfig {
   tracer_03: string;
 }
 
+/**
+ * Formats ISO or YYYY-MM-DD string into standard Brazilian Date (DD/MM/YYYY)
+ */
+export function formatBrDate(isoOrDateStr?: string): string {
+  if (!isoOrDateStr) return '';
+  const clean = String(isoOrDateStr).trim();
+  if (clean.includes('/')) return clean;
+  const parts = clean.split('T')[0].split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return clean;
+}
+
+/**
+ * Formats time string into standard Brazilian Time (HH:mm:ss)
+ */
+export function formatBrTime(timeStr?: string): string {
+  if (!timeStr) return '';
+  const clean = String(timeStr).trim();
+  if (clean.length === 5) return `${clean}:00`;
+  return clean;
+}
+
+/**
+ * Formats current Date into standard Google Sheets Timestamp: "DD/MM/YYYY HH:mm:ss" (no comma)
+ */
+export function formatBrTimestamp(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const day = pad(d.getDate());
+  const month = pad(d.getMonth() + 1);
+  const year = d.getFullYear();
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  const seconds = pad(d.getSeconds());
+  return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+}
+
 const STORAGE_KEYS: Record<string, string> = {
   tracer_01: 'url_webhook_tracer_01',
   tracer_02: 'url_webhook_tracer_02',
@@ -171,9 +209,49 @@ export async function sendAuditToGoogleSheet(audit: {
   rawData: Record<string, any>;
   patientName?: string;
   unitName?: string;
+  auditorName?: string;
+  medicalRecordNumber?: string;
+  tracerDate?: string;
+  tracerTime?: string;
+  sector?: string;
 }): Promise<{ success: boolean; message: string; queued?: boolean }> {
   const normTracerId = audit.tracerId === '01' || audit.tracerId === 'T01' ? 'tracer_01' : audit.tracerId === '02' || audit.tracerId === 'T02' ? 'tracer_02' : audit.tracerId === '03' || audit.tracerId === 'T03' ? 'tracer_03' : audit.tracerId;
   const webhookUrl = getWebhookUrl(normTracerId);
+
+  // Normalize rawData with standard headers and timestamps
+  const enrichedData: Record<string, any> = { ...audit.rawData };
+
+  // Timestamp format: "DD/MM/YYYY HH:mm:ss" without comma
+  if (!enrichedData['Carimbo de data/hora']) {
+    enrichedData['Carimbo de data/hora'] = formatBrTimestamp(new Date());
+  }
+
+  // Ensure standard fields are available with canonical keys
+  if (audit.unitName && !enrichedData['Nome do Hospital/Maternidade']) {
+    enrichedData['Nome do Hospital/Maternidade'] = audit.unitName;
+    enrichedData['Nome do Hospital/Maternidade:'] = audit.unitName;
+  }
+  if (audit.patientName && !enrichedData['Nome Completo do Paciente:']) {
+    enrichedData['Nome Completo do Paciente:'] = audit.patientName;
+    enrichedData['Nome Completo do Paciente'] = audit.patientName;
+  }
+  if (audit.auditorName && !enrichedData['Nome Completo do Auditor:']) {
+    enrichedData['Nome Completo do Auditor:'] = audit.auditorName;
+    enrichedData['Nome Completo do Auditor'] = audit.auditorName;
+  }
+  if (audit.medicalRecordNumber && !enrichedData['Nº do Prontuário do Paciente:']) {
+    enrichedData['Nº do Prontuário do Paciente:'] = audit.medicalRecordNumber;
+    enrichedData['Nº do Prontuário do Paciente'] = audit.medicalRecordNumber;
+  }
+  if (audit.tracerDate && !enrichedData['Data do Tracer:']) {
+    enrichedData['Data do Tracer:'] = formatBrDate(audit.tracerDate);
+  }
+  if (audit.tracerTime && !enrichedData['Horário do Início do Tracer:']) {
+    enrichedData['Horário do Início do Tracer:'] = formatBrTime(audit.tracerTime);
+  }
+  if (audit.sector && !enrichedData['Setor Auditado:']) {
+    enrichedData['Setor Auditado:'] = audit.sector;
+  }
 
   if (!webhookUrl) {
     // Webhook not configured yet; save in pending queue in case user configures it later
@@ -182,7 +260,7 @@ export async function sendAuditToGoogleSheet(audit: {
       tracerId: normTracerId,
       type: audit.type,
       timestamp: new Date().toISOString(),
-      rawData: audit.rawData,
+      rawData: enrichedData,
       patientName: audit.patientName,
       unitName: audit.unitName
     });
@@ -200,8 +278,13 @@ export async function sendAuditToGoogleSheet(audit: {
     type: audit.type,
     patientName: audit.patientName || '',
     unitName: audit.unitName || '',
+    auditorName: audit.auditorName || '',
+    medicalRecordNumber: audit.medicalRecordNumber || '',
+    tracerDate: formatBrDate(audit.tracerDate) || '',
+    tracerTime: formatBrTime(audit.tracerTime) || '',
+    sector: audit.sector || '',
     createdAt: new Date().toISOString(),
-    data: audit.rawData
+    data: enrichedData
   };
 
   try {
@@ -229,7 +312,7 @@ export async function sendAuditToGoogleSheet(audit: {
       tracerId: normTracerId,
       type: audit.type,
       timestamp: new Date().toISOString(),
-      rawData: audit.rawData,
+      rawData: enrichedData,
       patientName: audit.patientName,
       unitName: audit.unitName
     });
@@ -362,8 +445,8 @@ export function getAppsScriptCode(): string {
  * 1. Abra a sua Planilha no Google Sheets onde deseja receber os dados.
  * 2. No menu superior da planilha, clique em: Extensões > Apps Script.
  * 3. Apague QUALQUER código existente e COLE este código completo.
- * 4. Clique no botão azul "Implantar" (Deploy) no canto superior direito > "Nova Implantação".
- * 5. Na engrenagem ao lado de "Selecionar tipo", escolha: "App da Web" (Web App).
+ * 4. Clique no botão azul "Implantar" (Deploy) no canto superior direito > "Gerenciar Implantações" ou "Nova Implantação".
+ * 5. Se for Nova Implantação, escolha "App da Web" (Web App).
  * 6. Configure exatamente assim:
  *    - Descrição: "Webhook Tracers Hospitalares"
  *    - Executar como: "Eu" (seu e-mail)
@@ -377,12 +460,17 @@ function doPost(e) {
   
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    // Prioriza a aba com respostas ou primeira aba
-    var sheet = ss.getSheetByName("Respostas ao formulário 1") || 
+    
+    // Identificação inteligente da aba de respostas do formulário
+    var sheet = ss.getSheetByName("Form_Responses") || 
+                ss.getSheetByName("Form Responses 1") || 
+                ss.getSheetByName("Respostas ao formulário 1") || 
+                ss.getSheetByName("Respostas ao formulario 1") || 
                 ss.getSheetByName("Respostas") || 
                 ss.getSheetByName("Tracer 01") || 
                 ss.getSheetByName("Tracer 02") || 
                 ss.getSheetByName("Tracer 03") || 
+                ss.getActiveSheet() || 
                 ss.getSheets()[0];
                 
     if (!e || !e.postData || !e.postData.contents) {
@@ -395,13 +483,20 @@ function doPost(e) {
     var postData = JSON.parse(e.postData.contents);
     var action = postData.action || 'add_row';
     
-    // Helper de normalização para comparação insensível a números/pontuação
-    function normalizeHeader(str) {
-      if (!str) return '';
-      return String(str)
-        .replace(/^[0-9]+[\\.\\-\\s]+/g, '') // remove "01.", "02-", etc.
-        .replace(/[:\\?\\*]/g, '')           // remove ":", "?", "*"
-        .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '') // remove acentos
+    // Helper para formatar data/hora nativa do Google Sheets: "DD/MM/YYYY HH:mm:ss"
+    function formatDateTime(d) {
+      var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + 
+             pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    
+    // Helper de limpeza e normalização de cabeçalhos
+    function cleanStr(val) {
+      if (!val) return '';
+      return String(val)
+        .replace(/^[0-9]+[\\.\\s\\-]+/g, '')  // remove prefixos numéricos ("02-", "01. ")
+        .replace(/[:\\?\\*\\n\\r\\t_]/g, ' ')   // remove pontuação, quebras de linha e underscores
+        .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '') // remove acentuação
         .toLowerCase()
         .replace(/\\s+/g, ' ')
         .trim();
@@ -412,8 +507,8 @@ function doPost(e) {
     // ==========================================
     if (action === 'delete_row' || action === 'delete') {
       var targetId = String(postData.id || '').trim();
-      var targetPatient = String(postData.patientName || '').trim().toLowerCase();
-      var targetUnit = String(postData.unitName || '').trim().toLowerCase();
+      var targetPatient = cleanStr(postData.patientName || '');
+      var targetUnit = cleanStr(postData.unitName || '');
       var targetTimestamp = String(postData.timestamp || '').trim();
       
       var dataRange = sheet.getDataRange();
@@ -427,24 +522,19 @@ function doPost(e) {
       
       var headers = values[0];
       var deletedRowsCount = 0;
-      
-      var idColIdx = -1;
       var patientColIdx = -1;
       var unitColIdx = -1;
       var timeColIdx = -1;
       
       for (var h = 0; h < headers.length; h++) {
-        var normH = normalizeHeader(headers[h]);
-        if (normH.indexOf('id sistema') !== -1 || normH === 'id' || normH.indexOf('codigo') !== -1) {
-          idColIdx = h;
-        }
-        if (normH.indexOf('paciente') !== -1 || normH.indexOf('prontuario') !== -1) {
+        var nH = cleanStr(headers[h]);
+        if (patientColIdx === -1 && (nH.indexOf('paciente') !== -1 || nH.indexOf('prontuario') !== -1)) {
           patientColIdx = h;
         }
-        if (normH.indexOf('hospital') !== -1 || normH.indexOf('unidade') !== -1 || normH.indexOf('maternidade') !== -1) {
+        if (unitColIdx === -1 && (nH.indexOf('hospital') !== -1 || nH.indexOf('unidade') !== -1 || nH.indexOf('maternidade') !== -1)) {
           unitColIdx = h;
         }
-        if (normH.indexOf('carimbo') !== -1 || normH.indexOf('data e hora') !== -1 || normH.indexOf('timestamp') !== -1) {
+        if (timeColIdx === -1 && (nH.indexOf('carimbo') !== -1 || nH.indexOf('data e hora') !== -1 || nH.indexOf('timestamp') !== -1)) {
           timeColIdx = h;
         }
       }
@@ -453,11 +543,8 @@ function doPost(e) {
         var row = values[r];
         var isMatch = false;
         
-        if (targetId && idColIdx !== -1 && String(row[idColIdx]).trim() === targetId) {
-          isMatch = true;
-        }
-        
-        if (!isMatch && targetId) {
+        // Match por ID se existir em qualquer coluna da linha
+        if (targetId) {
           for (var c = 0; c < row.length; c++) {
             if (String(row[c]).trim() === targetId) {
               isMatch = true;
@@ -466,15 +553,16 @@ function doPost(e) {
           }
         }
         
-        if (!isMatch && targetPatient) {
-          var rowPatient = patientColIdx !== -1 ? String(row[patientColIdx]).trim().toLowerCase() : '';
-          var rowUnit = unitColIdx !== -1 ? String(row[unitColIdx]).trim().toLowerCase() : '';
-          var rowTime = timeColIdx !== -1 ? String(row[timeColIdx]).trim() : '';
-          
-          if (rowPatient && (rowPatient.indexOf(targetPatient) !== -1 || targetPatient.indexOf(rowPatient) !== -1)) {
-            if (targetUnit && rowUnit && (rowUnit.indexOf(targetUnit) !== -1 || targetUnit.indexOf(rowUnit) !== -1)) {
-              isMatch = true;
-            } else if (targetTimestamp && rowTime && rowTime.indexOf(targetTimestamp.substring(0, 10)) !== -1) {
+        // Match por Paciente + Unidade
+        if (!isMatch && targetPatient && patientColIdx !== -1) {
+          var rowPat = cleanStr(row[patientColIdx]);
+          if (rowPat && (rowPat.indexOf(targetPatient) !== -1 || targetPatient.indexOf(rowPat) !== -1)) {
+            if (targetUnit && unitColIdx !== -1) {
+              var rowUn = cleanStr(row[unitColIdx]);
+              if (rowUn && (rowUn.indexOf(targetUnit) !== -1 || targetUnit.indexOf(rowUn) !== -1)) {
+                isMatch = true;
+              }
+            } else {
               isMatch = true;
             }
           }
@@ -486,6 +574,7 @@ function doPost(e) {
         }
       }
       
+      SpreadsheetApp.flush();
       return ContentService.createTextOutput(JSON.stringify({ 
         status: 'success', 
         message: deletedRowsCount > 0 
@@ -499,87 +588,93 @@ function doPost(e) {
     // ==========================================
     var rowData = postData.data || {};
     
-    // Adicionar metadados automáticos
+    // Garante Carimbo de data/hora no formato limpo padrão
     if (!rowData['Carimbo de data/hora'] && !rowData['Data e Hora']) {
-      rowData['Carimbo de data/hora'] = new Date().toLocaleString('pt-BR');
-    }
-    if (postData.id && !rowData['ID_SISTEMA']) {
-      rowData['ID_SISTEMA'] = postData.id;
+      rowData['Carimbo de data/hora'] = formatDateTime(new Date());
     }
     
-    var lastColumn = sheet.getLastColumn();
+    var lastCol = sheet.getLastColumn();
     var headers = [];
-    if (lastColumn > 0) {
-      headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    if (lastCol > 0) {
+      headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     }
     
-    // Se a planilha estiver completamente vazia, inicializar cabeçalhos
+    // Se a planilha estiver completamente vazia, inicializar cabeçalhos da primeira linha
     if (headers.length === 0 || (headers.length === 1 && String(headers[0]).trim() === '')) {
       headers = Object.keys(rowData);
       sheet.appendRow(headers);
-    } else {
-      // Mapeamento inteligente: verifica se alguma chave nova precisa ser adicionada como coluna
-      var incomingKeys = Object.keys(rowData);
-      var normalizedExisting = headers.map(normalizeHeader);
-      
-      for (var k = 0; k < incomingKeys.length; k++) {
-        var key = incomingKeys[k];
-        var normKey = normalizeHeader(key);
-        var foundIndex = normalizedExisting.indexOf(normKey);
-        
-        if (foundIndex === -1 && key !== 'ID_SISTEMA') {
-          // Coluna nova: adicionar ao final da linha 1
-          headers.push(key);
-          normalizedExisting.push(normKey);
-          sheet.getRange(1, headers.length).setValue(key);
-        }
-      }
     }
     
-    // Construir a nova linha com base nos cabeçalhos existentes
+    var normHeaders = headers.map(cleanStr);
     var newRow = [];
-    var normExistingHeaders = headers.map(normalizeHeader);
     
-    for (var j = 0; j < headers.length; j++) {
-      var headerName = headers[j];
-      var normH = normExistingHeaders[j];
-      var cellVal = undefined;
+    // Mapeamento coluna a coluna rigoroso para cada cabeçalho existente na planilha
+    for (var c = 0; c < headers.length; c++) {
+      var header = String(headers[c] || '').trim();
+      var normH = normHeaders[c];
+      var val = undefined;
       
-      // 1. Busca direta exata
-      if (rowData[headerName] !== undefined) {
-        cellVal = rowData[headerName];
+      // 1. Busca direta exata pelo nome do cabeçalho
+      if (rowData[header] !== undefined && rowData[header] !== null && String(rowData[header]).trim() !== '') {
+        val = rowData[header];
       }
       
-      // 2. Busca normalizada inteligente
-      if (cellVal === undefined) {
-        for (var rawK in rowData) {
-          if (normalizeHeader(rawK) === normH) {
-            cellVal = rowData[rawK];
-            break;
+      // 2. Busca exata com/sem dois-pontos final
+      if (val === undefined) {
+        if (header.slice(-1) === ':') {
+          var withoutColon = header.slice(0, -1).trim();
+          if (rowData[withoutColon] !== undefined && String(rowData[withoutColon]).trim() !== '') {
+            val = rowData[withoutColon];
+          }
+        } else {
+          var withColon = header + ':';
+          if (rowData[withColon] !== undefined && String(rowData[withColon]).trim() !== '') {
+            val = rowData[withColon];
           }
         }
       }
       
-      // 3. Fallbacks de campos padrão
-      if (cellVal === undefined || cellVal === null) {
-        if (normH.indexOf('carimbo') !== -1 || normH.indexOf('data e hora') !== -1) {
-          cellVal = new Date().toLocaleString('pt-BR');
-        } else if (normH.indexOf('id sistema') !== -1 || normH === 'id') {
-          cellVal = postData.id || '';
-        } else if (normH.indexOf('hospital') !== -1 || normH.indexOf('maternidade') !== -1) {
-          cellVal = postData.unitName || '';
-        } else if (normH.indexOf('paciente') !== -1 && normH.indexOf('nome') !== -1) {
-          cellVal = postData.patientName || '';
-        } else {
-          cellVal = '';
+      // 3. Busca normalizada inteligente em todas as chaves enviadas
+      if (val === undefined) {
+        for (var k in rowData) {
+          if (rowData[k] !== undefined && rowData[k] !== null && String(rowData[k]).trim() !== '') {
+            if (cleanStr(k) === normH) {
+              val = rowData[k];
+              break;
+            }
+          }
         }
       }
       
-      newRow.push(cellVal);
+      // 4. Fallbacks semânticos baseados no tipo da coluna
+      if (val === undefined || val === null || val === '') {
+        if (normH.indexOf('carimbo') !== -1 || normH.indexOf('data e hora') !== -1 || normH.indexOf('timestamp') !== -1) {
+          val = rowData['Carimbo de data/hora'] || formatDateTime(new Date());
+        } else if (normH.indexOf('hospital') !== -1 || normH.indexOf('maternidade') !== -1 || normH.indexOf('unidade') !== -1) {
+          val = postData.unitName || rowData['Nome do Hospital/Maternidade'] || rowData['Nome do Hospital/Maternidade:'] || '';
+        } else if (normH.indexOf('data') !== -1 && normH.indexOf('tracer') !== -1) {
+          val = postData.tracerDate || rowData['Data do Tracer:'] || rowData['Data do Tracer'] || rowData['Data'] || '';
+        } else if (normH.indexOf('horario') !== -1 || (normH.indexOf('hora') !== -1 && normH.indexOf('inicio') !== -1)) {
+          val = postData.tracerTime || rowData['Horário do Início do Tracer:'] || rowData['Horário do Início do Tracer'] || rowData['Horario'] || '';
+        } else if (normH.indexOf('setor') !== -1) {
+          val = postData.sector || rowData['Setor Auditado:'] || rowData['Setor Auditado'] || rowData['Setor'] || '';
+        } else if (normH.indexOf('auditor') !== -1) {
+          val = postData.auditorName || rowData['Nome Completo do Auditor:'] || rowData['Nome Completo do Auditor'] || rowData['Auditor'] || '';
+        } else if (normH.indexOf('paciente') !== -1 && (normH.indexOf('nome') !== -1 || normH.indexOf('completo') !== -1)) {
+          val = postData.patientName || rowData['Nome Completo do Paciente:'] || rowData['Nome Completo do Paciente'] || rowData['Nome do paciente:'] || '';
+        } else if (normH.indexOf('prontuario') !== -1) {
+          val = postData.medicalRecordNumber || rowData['Nº do Prontuário do Paciente:'] || rowData['Nº do Prontuário do Paciente'] || '';
+        } else {
+          val = '';
+        }
+      }
+      
+      newRow.push(val);
     }
     
-    // Inserir a nova linha na planilha
+    // Grava a linha completa na planilha
     sheet.appendRow(newRow);
+    SpreadsheetApp.flush();
     
     return ContentService.createTextOutput(JSON.stringify({ 
       status: 'success', 

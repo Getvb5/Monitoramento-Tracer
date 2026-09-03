@@ -3,6 +3,7 @@ import { db } from '../../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_01_UNITS } from '../../lib/utils';
+import { formatBrDate, formatBrTime, formatBrTimestamp } from '../../lib/googleSheetWebhook';
 import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -102,52 +103,71 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
           console.error("Failed to parse sourceRowHash in form", e);
         }
       }
+
+      // Flexible reader that checks both canonical and numbered keys
+      const getVal = (...keys: string[]): string => {
+        for (const k of keys) {
+          if (rData[k] !== undefined && rData[k] !== null && String(rData[k]).trim() !== '') {
+            return String(rData[k]);
+          }
+        }
+        for (const k of keys) {
+          const normK = k.replace(/^[0-9]+[\.\-\s]+/g, '').toLowerCase().replace(/[:\?\*\s]/g, '');
+          for (const rk in rData) {
+            const normRk = rk.replace(/^[0-9]+[\.\-\s]+/g, '').toLowerCase().replace(/[:\?\*\s]/g, '');
+            if (normK === normRk && rData[rk]) {
+              return String(rData[rk]);
+            }
+          }
+        }
+        return '';
+      };
       
       setUnitId(editingAudit.unitId || '');
       setFormData({
-        q1_hospital: rData['02- Nome do Hospital/Maternidade:'] || '',
-        q2_data: rData['03- Data do Tracer:'] || getTodayDateStr(),
-        q3_horario: rData['04- Horário do Início do Tracer:'] || rData['03- Data do Tracer:'] || getCurrentTimeStr(),
-        q4_setor: rData['05- Setor Auditado:'] || '',
-        q5_auditor: rData['06- Nome Completo do Auditor:'] || user.displayName || '',
-        q6_paciente: rData['07- Nome do paciente:'] || rData['07- Nome Completo do Paciente:'] || '',
-        q7_prontuario: rData['08- Nº do Prontuário do Paciente:'] || '',
-        q8_compreende_plano: rData['09- Paciente ou responsável compreende o plano terapêutico?'] || '',
-        q9_compreende_plano_justificativa: rData['09- Se não, justifique:'] || rData['09- Se não, justifique: '] || '',
-        q10_pulseira_branca: rData['10- Paciente identificado com pulseira branca?'] || '',
-        q11_pulseira_branca_justificativa: rData['11- Se não, justifique:'] || rData['11- Se não, justifique: '] || '',
-        q12_pulseira_legivel: rData['12- A pulseira de identificação está legível?'] || '',
-        q13_pulseira_legivel_justificativa: rData['13- Se não, justifique:'] || rData['13- Se não, justifique: '] || '',
-        q14_pulseira_preenchida: rData['14- A pulseira de identificação preenchida adequadamente?'] || '',
-        q15_pulseira_preenchida_justificativa: rData['15- Se não, justifique:'] || rData['15- Se não, justifique: '] || '',
-        q16_alergia: rData['16- O paciente tem alergia alimentar/medicamentosa?'] || '',
-        q17_alergia_sinalizada: rData['17- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?'] || '',
-        q18_alergia_justificativa: rData['18- Se não, justifique:'] || rData['18- Se não, justifique: '] || '',
-        q19_placa_leito: rData['19- Placa de identificação do leito afixada?'] || '',
-        q20_placa_leito_justificativa: rData['20- Se não, justifique:'] || rData['20- Se não, justifique: '] || '',
-        q21_placa_preenchida: rData['21- Placa de identificação preenchida adequadamente?'] || '',
-        q22_placa_preenchida_justificativa: rData['22- Se não, justifique:'] || rData['22- Se não, justifique: '] || '',
-        q23_placa_riscos: rData['23- Placa de identificação do leito com os riscos sinalizados?'] || '',
-        q24_placa_riscos_justificativa: rData['24- Se não, justifique:'] || rData['24- Se não, justifique: '] || '',
-        q25_rotulos_dieta: rData['25- Os rótulos da dieta estão com todos os identificadores obrigatórios?'] || '',
-        q26_rotulos_dieta_justificativa: rData['26- Se não, justifique:'] || rData['26- Se não, justifique: '] || '',
-        q27_rotulo_medicamento: rData['27- O rótulo de medicamentos está com todos os identificadores obrigatórios?'] || '',
-        q28_higienizacao_maos: rData['28- A higienização das mãos foi realizada?'] || '',
-        q29_higienizacao_maos_justificativa: rData['29- Se não, justifique:'] || rData['29- Se não, justifique: '] || '',
-        q30_acesso_venoso: rData['30- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?'] || '',
-        q31_acesso_venoso_justificativa: rData['31- Se não, justifique:'] || rData['31- Se não, justifique: '] || '',
-        q32_curativo_ferida: rData['32- Curativo da ferida identificado, válido e íntegro? (Cirurgias, Lesões, Drenos..)'] || '',
-        q33_curativo_ferida_justificativa: rData['33- Se não, justifique:'] || rData['33- Se não, justifique: '] || '',
-        q34_decubito_correto: rData['34- Paciente está no decúbito correto de acordo com o relógio da pele no momento da visita?'] || '',
-        q35_decubito_correto_justificativa: rData['35- Se não, justifique:'] || rData['35- Se não, justifique: '] || '',
-        q36_orientacao_lesao: rData['36- Paciente recebeu orientação de prevenção de lesão por pressão?'] || '',
-        q37_grades_elevadas: rData['37- Grades do leito elevadas?'] || '',
-        q38_grades_elevadas_justificativa: rData['38- Se não, justifique:'] || rData['38- Se não, justifique: '] || '',
-        q39_orientacao_queda: rData['39- O paciente recebeu orientação sobre as medidas de prevenção de queda?'] || '',
-        q40_passagem_plantao: rData['40- Passagem de plantão da enfermagem com formulário padrão preenchido?'] || '',
-        q41_passagem_plantao_justificativa: rData['41- Se não, justifique:'] || rData['41- Se não, justifique: '] || '',
-        q42_SBAR: rData['42- Em caso de transferência (interna/externa) o formulário de transferência/SBAR preenchido adequadamente?'] || '',
-        q43_SBAR_justificativa: rData['43- Se não, justifique:'] || rData['43- Se não, justifique: '] || '',
+        q1_hospital: getVal('Nome do Hospital/Maternidade:', 'Nome do Hospital/Maternidade', '02- Nome do Hospital/Maternidade:'),
+        q2_data: getVal('Data do Tracer:', 'Data do Tracer', '03- Data do Tracer:', 'Data') || getTodayDateStr(),
+        q3_horario: getVal('Horário do Início do Tracer:', 'Horário do Início do Tracer', '04- Horário do Início do Tracer:', 'Horário') || getCurrentTimeStr(),
+        q4_setor: getVal('Setor Auditado:', 'Setor Auditado', '05- Setor Auditado:', 'Setor'),
+        q5_auditor: getVal('Nome Completo do Auditor:', 'Nome Completo do Auditor', '06- Nome Completo do Auditor:', 'Auditor') || user.displayName || '',
+        q6_paciente: getVal('Nome Completo do Paciente:', 'Nome Completo do Paciente', 'Nome do paciente:', '07- Nome do paciente:', '07- Nome Completo do Paciente:'),
+        q7_prontuario: getVal('Nº do Prontuário do Paciente:', 'Nº do Prontuário do Paciente', '08- Nº do Prontuário do Paciente:'),
+        q8_compreende_plano: getVal('Paciente ou responsável compreende o plano terapêutico?', '09- Paciente ou responsável compreende o plano terapêutico?'),
+        q9_compreende_plano_justificativa: getVal('Se não, justifique:', '09- Se não, justifique:'),
+        q10_pulseira_branca: getVal('Paciente identificado com pulseira branca?', '10- Paciente identificado com pulseira branca?'),
+        q11_pulseira_branca_justificativa: getVal('Se não, justifique:_1', '11- Se não, justifique:'),
+        q12_pulseira_legivel: getVal('A pulseira de identificação está legível?', '12- A pulseira de identificação está legível?'),
+        q13_pulseira_legivel_justificativa: getVal('Se não, justifique:_2', '13- Se não, justifique:'),
+        q14_pulseira_preenchida: getVal('A pulseira de identificação preenchida adequadamente?', '14- A pulseira de identificação preenchida adequadamente?'),
+        q15_pulseira_preenchida_justificativa: getVal('Se não, justifique:_3', '15- Se não, justifique:'),
+        q16_alergia: getVal('O paciente tem alergia alimentar/medicamentosa?', '16- O paciente tem alergia alimentar/medicamentosa?'),
+        q17_alergia_sinalizada: getVal('Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?', '17- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?'),
+        q18_alergia_justificativa: getVal('Se não, justifique:_4', '18- Se não, justifique:'),
+        q19_placa_leito: getVal('Placa de identificação do leito afixada?', '19- Placa de identificação do leito afixada?'),
+        q20_placa_leito_justificativa: getVal('Se não, justifique:_5', '20- Se não, justifique:'),
+        q21_placa_preenchida: getVal('Placa de identificação preenchida adequadamente?', '21- Placa de identificação preenchida adequadamente?'),
+        q22_placa_preenchida_justificativa: getVal('Se não, justifique:_6', '22- Se não, justifique:'),
+        q23_placa_riscos: getVal('Placa de identificação do leito com os riscos sinalizados?', '23- Placa de identificação do leito com os riscos sinalizados?'),
+        q24_placa_riscos_justificativa: getVal('Se não, justifique:_7', '24- Se não, justifique:'),
+        q25_rotulos_dieta: getVal('Os rótulos da dieta estão com todos os identificadores obrigatórios?', '25- Os rótulos da dieta estão com todos os identificadores obrigatórios?'),
+        q26_rotulos_dieta_justificativa: getVal('Se não, justifique:_8', '26- Se não, justifique:'),
+        q27_rotulo_medicamento: getVal('O rótulo de medicamentos está com todos os identificadores obrigatórios?', '27- O rótulo de medicamentos está com todos os identificadores obrigatórios?'),
+        q28_higienizacao_maos: getVal('A higienização das mãos foi realizada?', '28- A higienização das mãos foi realizada?'),
+        q29_higienizacao_maos_justificativa: getVal('Se não, justifique:_9', '29- Se não, justifique:'),
+        q30_acesso_venoso: getVal('Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?', '30- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?'),
+        q31_acesso_venoso_justificativa: getVal('Se não, justifique:_10', '31- Se não, justifique:'),
+        q32_curativo_ferida: getVal('Curativo da ferida identificado, válido e íntegro? (Cirurgias, Lesões, Drenos..)', '32- Curativo da ferida identificado, válido e íntegro? (Cirurgias, Lesões, Drenos..)'),
+        q33_curativo_ferida_justificativa: getVal('Se não, justifique:_11', '33- Se não, justifique:'),
+        q34_decubito_correto: getVal('Paciente está no decúbito correto de acordo com o relógio da pele no momento da visita?', '34- Paciente está no decúbito correto de acordo com o relógio da pele no momento da visita?'),
+        q35_decubito_correto_justificativa: getVal('Se não, justifique:_12', '35- Se não, justifique:'),
+        q36_orientacao_lesao: getVal('Paciente recebeu orientação de prevenção de lesão por pressão?', '36- Paciente recebeu orientação de prevenção de lesão por pressão?'),
+        q37_grades_elevadas: getVal('Grades do leito elevadas?', '37- Grades do leito elevadas?'),
+        q38_grades_elevadas_justificativa: getVal('Se não, justifique:_13', '38- Se não, justifique:'),
+        q39_orientacao_queda: getVal('O paciente recebeu orientação sobre as medidas de prevenção de queda?', '39- O paciente recebeu orientação sobre as medidas de prevenção de queda?'),
+        q40_passagem_plantao: getVal('Passagem de plantão da enfermagem com formulário padrão preenchido?', '40- Passagem de plantão da enfermagem com formulário padrão preenchido?'),
+        q41_passagem_plantao_justificativa: getVal('Se não, justifique:_14', '41- Se não, justifique:'),
+        q42_SBAR: getVal('Em caso de transferência (interna/externa) o formulário de transferência/SBAR preenchido adequadamente?', '42- Em caso de transferência (interna/externa) o formulário de transferência/SBAR preenchido adequadamente?'),
+        q43_SBAR_justificativa: getVal('Se não, justifique:_15', '43- Se não, justifique:'),
       });
     } else {
       const effectiveUnit = !isAdmin && userUnit ? userUnit : null;
@@ -354,52 +374,133 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
     setError('');
     setErrorFieldId('');
 
-    // Construct rawData EXACTLY as it appears in Google Forms matching PDF
+    // Construct rawData EXACTLY as it appears in Google Forms matching PDF & Spreadsheet columns
     const unitName = HEALTH_UNITS.find(u => u.id === unitId)?.name || '';
     const rawData: Record<string, string> = {
+      'Carimbo de data/hora': formatBrTimestamp(new Date()),
+      'Nome do Hospital/Maternidade': unitName,
+      'Nome do Hospital/Maternidade:': unitName,
       '02- Nome do Hospital/Maternidade:': unitName,
+      'Data do Tracer:': formatBrDate(formData.q2_data),
       '03- Data do Tracer:': formData.q2_data,
+      'Horário do Início do Tracer:': formatBrTime(formData.q3_horario),
       '04- Horário do Início do Tracer:': formData.q3_horario,
+      'Setor Auditado:': formData.q4_setor,
       '05- Setor Auditado:': formData.q4_setor,
+      'Nome Completo do Auditor:': formData.q5_auditor,
       '06- Nome Completo do Auditor:': formData.q5_auditor,
+      'Nome Completo do Paciente:': formData.q6_paciente,
+      'Nome do paciente:': formData.q6_paciente,
       '07- Nome do paciente:': formData.q6_paciente,
+      '07- Nome Completo do Paciente:': formData.q6_paciente,
+      'Nº do Prontuário do Paciente:': formData.q7_prontuario,
       '08- Nº do Prontuário do Paciente:': formData.q7_prontuario,
+      'Paciente ou responsável compreende o plano terapêutico?': formData.q8_compreende_plano,
       '09- Paciente ou responsável compreende o plano terapêutico?': formData.q8_compreende_plano,
-      ...(formData.q8_compreende_plano === 'Não' && { '09- Se não, justifique:': formData.q9_compreende_plano_justificativa }),
+      ...(formData.q8_compreende_plano === 'Não' && { 
+        'Se não, justifique:': formData.q9_compreende_plano_justificativa,
+        '09- Se não, justifique:': formData.q9_compreende_plano_justificativa 
+      }),
+      'Paciente identificado com pulseira branca?': formData.q10_pulseira_branca,
       '10- Paciente identificado com pulseira branca?': formData.q10_pulseira_branca,
-      ...(formData.q10_pulseira_branca === 'Não' && { '11- Se não, justifique:': formData.q11_pulseira_branca_justificativa }),
+      ...(formData.q10_pulseira_branca === 'Não' && { 
+        'Se não, justifique:_1': formData.q11_pulseira_branca_justificativa,
+        '11- Se não, justifique:': formData.q11_pulseira_branca_justificativa 
+      }),
+      'A pulseira de identificação está legível?': formData.q12_pulseira_legivel,
       '12- A pulseira de identificação está legível?': formData.q12_pulseira_legivel,
-      ...(formData.q12_pulseira_legivel === 'Não' && { '13- Se não, justifique:': formData.q13_pulseira_legivel_justificativa }),
+      ...(formData.q12_pulseira_legivel === 'Não' && { 
+        'Se não, justifique:_2': formData.q13_pulseira_legivel_justificativa,
+        '13- Se não, justifique:': formData.q13_pulseira_legivel_justificativa 
+      }),
+      'A pulseira de identificação preenchida adequadamente?': formData.q14_pulseira_preenchida,
       '14- A pulseira de identificação preenchida adequadamente?': formData.q14_pulseira_preenchida,
-      ...(formData.q14_pulseira_preenchida === 'Não' && { '15- Se não, justifique:': formData.q15_pulseira_preenchida_justificativa }),
+      ...(formData.q14_pulseira_preenchida === 'Não' && { 
+        'Se não, justifique:_3': formData.q15_pulseira_preenchida_justificativa,
+        '15- Se não, justifique:': formData.q15_pulseira_preenchida_justificativa 
+      }),
+      'O paciente tem alergia alimentar/medicamentosa?': formData.q16_alergia,
       '16- O paciente tem alergia alimentar/medicamentosa?': formData.q16_alergia,
-      ...(formData.q16_alergia === 'Sim' && { '17- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q17_alergia_sinalizada }),
-      ...(formData.q17_alergia_sinalizada === 'Não' && { '18- Se não, justifique:': formData.q18_alergia_justificativa }),
+      ...(formData.q16_alergia === 'Sim' && { 
+        'Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q17_alergia_sinalizada,
+        '17- Se tem alergia, está sinalizado com pulseira específica (Cor Rosa)?': formData.q17_alergia_sinalizada 
+      }),
+      ...(formData.q17_alergia_sinalizada === 'Não' && { 
+        'Se não, justifique:_4': formData.q18_alergia_justificativa,
+        '18- Se não, justifique:': formData.q18_alergia_justificativa 
+      }),
+      'Placa de identificação do leito afixada?': formData.q19_placa_leito,
       '19- Placa de identificação do leito afixada?': formData.q19_placa_leito,
-      ...(formData.q19_placa_leito === 'Não' && { '20- Se não, justifique:': formData.q20_placa_leito_justificativa }),
+      ...(formData.q19_placa_leito === 'Não' && { 
+        'Se não, justifique:_5': formData.q20_placa_leito_justificativa,
+        '20- Se não, justifique:': formData.q20_placa_leito_justificativa 
+      }),
+      'Placa de identificação preenchida adequadamente?': formData.q21_placa_preenchida,
       '21- Placa de identificação preenchida adequadamente?': formData.q21_placa_preenchida,
-      ...(formData.q21_placa_preenchida === 'Não' && { '22- Se não, justifique:': formData.q22_placa_preenchida_justificativa }),
+      ...(formData.q21_placa_preenchida === 'Não' && { 
+        'Se não, justifique:_6': formData.q22_placa_preenchida_justificativa,
+        '22- Se não, justifique:': formData.q22_placa_preenchida_justificativa 
+      }),
+      'Placa de identificação do leito com os riscos sinalizados?': formData.q23_placa_riscos,
       '23- Placa de identificação do leito com os riscos sinalizados?': formData.q23_placa_riscos,
-      ...(formData.q23_placa_riscos === 'Não' && { '24- Se não, justifique:': formData.q24_placa_riscos_justificativa }),
+      ...(formData.q23_placa_riscos === 'Não' && { 
+        'Se não, justifique:_7': formData.q24_placa_riscos_justificativa,
+        '24- Se não, justifique:': formData.q24_placa_riscos_justificativa 
+      }),
+      'Os rótulos da dieta estão com todos os identificadores obrigatórios?': formData.q25_rotulos_dieta,
       '25- Os rótulos da dieta estão com todos os identificadores obrigatórios?': formData.q25_rotulos_dieta,
-      ...(formData.q25_rotulos_dieta === 'Não' && { '26- Se não, justifique:': formData.q26_rotulos_dieta_justificativa }),
+      ...(formData.q25_rotulos_dieta === 'Não' && { 
+        'Se não, justifique:_8': formData.q26_rotulos_dieta_justificativa,
+        '26- Se não, justifique:': formData.q26_rotulos_dieta_justificativa 
+      }),
+      'O rótulo de medicamentos está com todos os identificadores obrigatórios?': formData.q27_rotulo_medicamento,
       '27- O rótulo de medicamentos está com todos os identificadores obrigatórios?': formData.q27_rotulo_medicamento,
+      'A higienização das mãos foi realizada?': formData.q28_higienizacao_maos,
       '28- A higienização das mãos foi realizada?': formData.q28_higienizacao_maos,
-      ...(formData.q28_higienizacao_maos === 'Não' && { '29- Se não, justifique:': formData.q29_higienizacao_maos_justificativa }),
+      ...(formData.q28_higienizacao_maos === 'Não' && { 
+        'Se não, justifique:_9': formData.q29_higienizacao_maos_justificativa,
+        '29- Se não, justifique:': formData.q29_higienizacao_maos_justificativa 
+      }),
+      'Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q30_acesso_venoso,
       '30- Acesso venoso foi identificado adequadamente (Nº do jelco/Data da punção/Nome do profissional)?': formData.q30_acesso_venoso,
-      ...(formData.q30_acesso_venoso === 'Não' && { '31- Se não, justifique:': formData.q31_acesso_venoso_justificativa }),
+      ...(formData.q30_acesso_venoso === 'Não' && { 
+        'Se não, justifique:_10': formData.q31_acesso_venoso_justificativa,
+        '31- Se não, justifique:': formData.q31_acesso_venoso_justificativa 
+      }),
+      'Curativo da ferida identificado, válido e íntegro? (Cirurgias, Lesões, Drenos..)': formData.q32_curativo_ferida,
       '32- Curativo da ferida identificado, válido e íntegro? (Cirurgias, Lesões, Drenos..)': formData.q32_curativo_ferida,
-      ...(formData.q32_curativo_ferida === 'Não' && { '33- Se não, justifique:': formData.q33_curativo_ferida_justificativa }),
+      ...(formData.q32_curativo_ferida === 'Não' && { 
+        'Se não, justifique:_11': formData.q33_curativo_ferida_justificativa,
+        '33- Se não, justifique:': formData.q33_curativo_ferida_justificativa 
+      }),
+      'Paciente está no decúbito correto de acordo com o relógio da pele no momento da visita?': formData.q34_decubito_correto,
       '34- Paciente está no decúbito correto de acordo com o relógio da pele no momento da visita?': formData.q34_decubito_correto,
-      ...(formData.q34_decubito_correto === 'Não' && { '35- Se não, justifique:': formData.q35_decubito_correto_justificativa }),
+      ...(formData.q34_decubito_correto === 'Não' && { 
+        'Se não, justifique:_12': formData.q35_decubito_correto_justificativa,
+        '35- Se não, justifique:': formData.q35_decubito_correto_justificativa 
+      }),
+      'Paciente recebeu orientação de prevenção de lesão por pressão?': formData.q36_orientacao_lesao,
       '36- Paciente recebeu orientação de prevenção de lesão por pressão?': formData.q36_orientacao_lesao,
+      'Grades do leito elevadas?': formData.q37_grades_elevadas,
       '37- Grades do leito elevadas?': formData.q37_grades_elevadas,
-      ...(formData.q37_grades_elevadas === 'Não' && { '38- Se não, justifique:': formData.q38_grades_elevadas_justificativa }),
+      ...(formData.q37_grades_elevadas === 'Não' && { 
+        'Se não, justifique:_13': formData.q38_grades_elevadas_justificativa,
+        '38- Se não, justifique:': formData.q38_grades_elevadas_justificativa 
+      }),
+      'O paciente recebeu orientação sobre as medidas de prevenção de queda?': formData.q39_orientacao_queda,
       '39- O paciente recebeu orientação sobre as medidas de prevenção de queda?': formData.q39_orientacao_queda,
+      'Passagem de plantão da enfermagem com formulário padrão preenchido?': formData.q40_passagem_plantao,
       '40- Passagem de plantão da enfermagem com formulário padrão preenchido?': formData.q40_passagem_plantao,
-      ...(formData.q40_passagem_plantao === 'Não' && { '41- Se não, justifique:': formData.q41_passagem_plantao_justificativa }),
+      ...(formData.q40_passagem_plantao === 'Não' && { 
+        'Se não, justifique:_14': formData.q41_passagem_plantao_justificativa,
+        '41- Se não, justifique:': formData.q41_passagem_plantao_justificativa 
+      }),
+      'Em caso de transferência (interna/externa) o formulário de transferência/SBAR preenchido adequadamente?': formData.q42_SBAR,
       '42- Em caso de transferência (interna/externa) o formulário de transferência/SBAR preenchido adequadamente?': formData.q42_SBAR,
-      ...(formData.q42_SBAR === 'Não' && { '43- Se não, justifique:': formData.q43_SBAR_justificativa })
+      ...(formData.q42_SBAR === 'Não' && { 
+        'Se não, justifique:_15': formData.q43_SBAR_justificativa,
+        '43- Se não, justifique:': formData.q43_SBAR_justificativa 
+      })
     };
 
     // Calculate legacy boolean scores for summary charts alignment
@@ -487,7 +588,12 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
           type: 'T01',
           rawData,
           patientName,
-          unitName
+          unitName,
+          auditorName,
+          medicalRecordNumber,
+          tracerDate: formData.q2_data,
+          tracerTime: formData.q3_horario,
+          sector
         });
       } catch (sheetErr) {
         console.warn('[PatientIdForm] Google Sheet webhook notice:', sheetErr);
