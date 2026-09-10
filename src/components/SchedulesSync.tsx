@@ -10,6 +10,7 @@ import { useAuditsData } from '../context/DataContext';
 import { motion } from 'motion/react';
 import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
 import { getAllWebhookUrls, getPendingQueue, flushPendingQueue } from '../lib/googleSheetWebhook';
+import { syncSingleTracer } from '../lib/autoSync';
 
 const TRACER_CONFIGS = [
   { 
@@ -113,7 +114,6 @@ export default function SchedulesSync() {
     localStorage.removeItem(`last_hash_${tracerId}`);
 
     try {
-      const { syncSingleTracer } = await import('../lib/autoSync');
       const res = await syncSingleTracer(tracerId, url, competencia);
       if (res.success) {
         if (res.imported > 0) {

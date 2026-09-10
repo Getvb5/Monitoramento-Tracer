@@ -1,33 +1,32 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { 
-  initializeFirestore, 
-  persistentLocalCache, 
-  persistentMultipleTabManager,
-  enableNetwork,
-  setLogLevel
+  getFirestore, 
+  doc,
+  getDocFromServer
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
-
-setLogLevel('error');
 
 const app = initializeApp(firebaseConfig);
 
 const firestoreDbId = (firebaseConfig as any).firestoreDatabaseId || "ai-studio-c51bd8fd-66f7-46cc-a3dd-9c9faf83ced0";
 
-// Initialize Firestore with robust multi-tab IndexedDB cache
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-}, firestoreDbId);
+// Initialize Firestore with standard database instance
+export const db = getFirestore(app, firestoreDbId);
 
-// Ensure online connection is always active
-if (typeof window !== 'undefined') {
+// Validate connection to Firestore as specified in Firebase Integration Skill
+async function testConnection() {
   try {
-    localStorage.removeItem('firestore_quota_exceeded');
-    enableNetwork(db).catch(() => {});
-  } catch (e) {}
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Please check your Firebase configuration: client is in offline mode.");
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  setTimeout(testConnection, 1000);
 }
 
 export const auth = getAuth(app);

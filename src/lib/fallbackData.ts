@@ -49,15 +49,68 @@ export function getAuditFingerprint(a: any): string {
     a.medicalRecordNumber || raw['Nº do Prontuário do Paciente:'] || raw['Nº do Prontuário do Paciente'] || raw['08- Nº do Prontuário do Paciente:'] || raw['Nº do Prontuário da Paciente:'] || raw['08- Nº do Prontuário da Paciente:'] || raw['Prontuário:'] || raw['Prontuário'] || ''
   );
 
-  const auditor = normalizeStr(
-    a.auditorName || raw['Nome Completo do Auditor:'] || raw['Nome Completo do Auditor'] || raw['06- Nome Completo do Auditor:'] || raw['05- Nome Completo do Auditor:'] || raw['Auditor'] || ''
-  );
+  const realAuditorName = extractRealAuditorName(a);
+  const auditor = normalizeStr(realAuditorName);
 
   const sector = normalizeStr(
     a.sector || raw['Setor Auditado:'] || raw['Setor Auditado'] || raw['05- Setor Auditado:'] || raw['04- Setor Auditado:'] || raw['Setor:'] || raw['Setor'] || ''
   );
 
   return `${type}__${unit}__${carimbo}__${patient}__${mrn}__${auditor}__${sector}`;
+}
+
+export function extractRealAuditorName(audit: any): string {
+  if (!audit) return 'Auditor de Campo';
+
+  const raw = audit.rawData || (audit.sourceRowHash ? (typeof audit.sourceRowHash === 'object' ? audit.sourceRowHash : (typeof audit.sourceRowHash === 'string' ? (() => { try { return JSON.parse(audit.sourceRowHash); } catch { return {}; } })() : {})) : {}) || {};
+
+  // Check direct specific keys in rawData first if auditorName is generic or missing
+  const directCandidates = [
+    raw['Nome Completo do Auditor:'],
+    raw['Nome Completo do Auditor'],
+    raw['06- Nome Completo do Auditor:'],
+    raw['06- Nome Completo do Auditor'],
+    raw['05- Nome Completo do Auditor:'],
+    raw['05- Nome Completo do Auditor'],
+    raw['04- Nome Completo do Auditor:'],
+    raw['04- Nome Completo do Auditor'],
+    raw['Nome Completo do Auditor: '],
+    raw['Nome do Auditor:'],
+    raw['Nome do Auditor'],
+    raw['Auditor:'],
+    raw['Auditor']
+  ];
+
+  for (const c of directCandidates) {
+    if (c && typeof c === 'string' && c.trim() && c.trim() !== '-' && c.trim() !== 'Auditor Sincronizado') {
+      return c.trim();
+    }
+  }
+
+  // Scan all keys in rawData looking for any key containing 'auditor'
+  for (const [k, v] of Object.entries(raw)) {
+    const kLow = k.toLowerCase();
+    if (kLow.includes('auditor') && !kLow.includes('setor') && !kLow.includes('unidade')) {
+      if (v && typeof v === 'string' && v.trim() && v.trim() !== '-' && v.trim() !== 'Auditor Sincronizado') {
+        return v.trim();
+      }
+    }
+  }
+
+  // If audit.auditorName is defined and not a placeholder
+  if (audit.auditorName && typeof audit.auditorName === 'string' && audit.auditorName.trim() && audit.auditorName.trim() !== '-' && audit.auditorName.trim() !== 'Auditor Sincronizado') {
+    return audit.auditorName.trim();
+  }
+
+  if (audit.auditor && typeof audit.auditor === 'string' && audit.auditor.trim() && audit.auditor !== 'Auditor Sincronizado') {
+    return audit.auditor.trim();
+  }
+
+  if (audit.auditorId && typeof audit.auditorId === 'string' && !audit.auditorId.startsWith('sync_') && audit.auditorId !== 'SYSTEM_SYNC') {
+    return audit.auditorId;
+  }
+
+  return 'Auditor de Campo';
 }
 
 export function deduplicateAudits(list: any[]): any[] {
@@ -69,6 +122,11 @@ export function deduplicateAudits(list: any[]): any[] {
   for (const item of list) {
     if (!item || !item.id || item.id.startsWith('f_') || deletedIds.includes(item.id)) {
       continue;
+    }
+
+    // Ensure auditorName is cleansed and never placeholder
+    if (!item.auditorName || item.auditorName === 'Auditor Sincronizado' || item.auditorName === '-') {
+      item.auditorName = extractRealAuditorName(item);
     }
 
     const fp = getAuditFingerprint(item);
@@ -212,7 +270,24 @@ export function getCustomLocalAudits(): LocalAudit[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        sourceList = parsed;
+        let cleanedStorage = false;
+        sourceList = parsed.map((item: any) => {
+          if (item && (!item.auditorName || item.auditorName === 'Auditor Sincronizado' || item.auditorName === '-')) {
+            cleanedStorage = true;
+            return {
+              ...item,
+              auditorName: extractRealAuditorName(item)
+            };
+          }
+          return item;
+        });
+        if (cleanedStorage) {
+          try {
+            localStorage.setItem('custom_local_audits', JSON.stringify(sourceList));
+          } catch (storageErr) {
+            console.warn('Could not rewrite cleansed custom_local_audits to localStorage:', storageErr);
+          }
+        }
       }
     }
     

@@ -692,18 +692,51 @@ export function calculateAuditorsParticipation(
   handAudits: any[],
   healthUnitsMap: Record<string, string>
 ): AuditorShareResult[] {
-  const auditorMap = new Map<string, AuditorShareResult>();
+  const auditorMap = new Map<string, AuditorShareResult & { unitCounts: Record<string, number> }>();
 
   const processAudit = (audit: any, type: 't01' | 't02' | 't03') => {
-    const raw = audit.rawData || (audit.sourceRowHash ? (typeof audit.sourceRowHash === 'string' ? JSON.parse(audit.sourceRowHash) : audit.sourceRowHash) : {});
+    const raw = audit.rawData || (audit.sourceRowHash ? (typeof audit.sourceRowHash === 'string' ? (() => { try { return JSON.parse(audit.sourceRowHash); } catch { return {}; } })() : audit.sourceRowHash) : {}) || {};
     
-    let auditorName = audit.auditorName || audit.auditor || raw['06- Nome Completo do Auditor:'] || raw['06- Nome Completo do Auditor'] || raw['Nome Completo do Auditor: '] || raw['Nome Completo do Auditor:'] || raw['04- Nome Completo do Auditor:'] || raw['05- Nome Completo do Auditor:'];
-    
-    if (!auditorName || auditorName.trim() === '' || auditorName === '-') {
-      auditorName = audit.auditorId ? (audit.auditorId.startsWith('AUDITOR_') ? 'Auditor do Sistema' : `Auditor (${audit.auditorId.slice(0, 6)})`) : 'Auditor Não Identificado';
+    let auditorName = audit.auditorName;
+    if (!auditorName || auditorName === 'Auditor Sincronizado' || auditorName.trim() === '' || auditorName === '-') {
+      const candidates = [
+        raw['Nome Completo do Auditor:'],
+        raw['Nome Completo do Auditor'],
+        raw['06- Nome Completo do Auditor:'],
+        raw['06- Nome Completo do Auditor'],
+        raw['05- Nome Completo do Auditor:'],
+        raw['05- Nome Completo do Auditor'],
+        raw['04- Nome Completo do Auditor:'],
+        raw['04- Nome Completo do Auditor'],
+        raw['Nome Completo do Auditor: '],
+        raw['Nome do Auditor:'],
+        raw['Nome do Auditor'],
+        raw['Auditor:'],
+        raw['Auditor']
+      ];
+      for (const c of candidates) {
+        if (c && typeof c === 'string' && c.trim() && c.trim() !== '-' && c.trim() !== 'Auditor Sincronizado') {
+          auditorName = c.trim();
+          break;
+        }
+      }
+      if (!auditorName || auditorName === 'Auditor Sincronizado') {
+        for (const [k, v] of Object.entries(raw)) {
+          const kLow = k.toLowerCase();
+          if (kLow.includes('auditor') && !kLow.includes('setor') && !kLow.includes('unidade')) {
+            if (v && typeof v === 'string' && v.trim() && v.trim() !== '-' && v.trim() !== 'Auditor Sincronizado') {
+              auditorName = v.trim();
+              break;
+            }
+          }
+        }
+      }
+      if (!auditorName || auditorName === 'Auditor Sincronizado') {
+        auditorName = audit.auditor || (audit.auditorId && !audit.auditorId.startsWith('sync_') && audit.auditorId !== 'SYSTEM_SYNC' ? audit.auditorId : 'Auditor Não Identificado');
+      }
     }
 
-    const key = auditorName.trim().toUpperCase();
+    const key = auditorName.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     
     let prof = audit.professionalCategory || raw['CATEGORIA PROFISSIONAL'] || raw['CATEGORIA'] || 'Enfermagem';
     if (typeof prof === 'string') {
@@ -718,7 +751,7 @@ export function calculateAuditorsParticipation(
     }
 
     const unitId = audit.unitId || audit.hospitalId || audit.unidadeId || '';
-    const unitName = healthUnitsMap[unitId] || unitId || 'Unidade Geral';
+    const unitName = healthUnitsMap[unitId] || audit.unitName || unitId || 'Unidade Geral';
 
     if (!auditorMap.has(key)) {
       auditorMap.set(key, {
@@ -726,12 +759,20 @@ export function calculateAuditorsParticipation(
         auditorName: auditorName.trim(),
         professionalCategory: prof,
         unitName,
+        unitCounts: { [unitName]: 1 },
         t01Count: 0,
         t02Count: 0,
         t03Count: 0,
         totalCount: 0,
         percentage: 0
       });
+    } else {
+      const entry = auditorMap.get(key)!;
+      entry.unitCounts[unitName] = (entry.unitCounts[unitName] || 0) + 1;
+      // If current display name is ALL-CAPS and incoming has mixed case, improve display readability
+      if (entry.auditorName === entry.auditorName.toUpperCase() && auditorName !== auditorName.toUpperCase()) {
+        entry.auditorName = auditorName.trim();
+      }
     }
 
     const existing = auditorMap.get(key)!;
@@ -747,10 +788,24 @@ export function calculateAuditorsParticipation(
 
   const totalAllAudits = patientAudits.length + surgeryAudits.length + handAudits.length;
 
-  const results = Array.from(auditorMap.values()).map(a => ({
-    ...a,
-    percentage: totalAllAudits > 0 ? Number(((a.totalCount / totalAllAudits) * 100).toFixed(1)) : 0
-  }));
+  const results = Array.from(auditorMap.values()).map(a => {
+    // Pick the primary unit name where the auditor has the highest audit count
+    let topUnit = a.unitName;
+    let maxUnitCount = 0;
+    for (const [u, count] of Object.entries(a.unitCounts || {})) {
+      if (count > maxUnitCount) {
+        maxUnitCount = count;
+        topUnit = u;
+      }
+    }
+
+    const { unitCounts, ...rest } = a;
+    return {
+      ...rest,
+      unitName: topUnit,
+      percentage: totalAllAudits > 0 ? Number(((a.totalCount / totalAllAudits) * 100).toFixed(1)) : 0
+    };
+  });
 
   return results.sort((a, b) => b.totalCount - a.totalCount);
 }

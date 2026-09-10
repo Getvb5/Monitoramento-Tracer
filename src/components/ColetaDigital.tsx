@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
+import { db } from '../lib/firebase';
+import { getDocs, collection, query, limit, doc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { 
+  getCustomLocalAudits,
+  getDeletedAuditIds, 
+  getMergedPatientAudits, 
+  getMergedSurgeryAudits, 
+  getMergedHandAudits,
+  deleteAuditFromLocal
+} from '../lib/fallbackData';
 import { HEALTH_UNITS } from '../lib/utils';
 import { 
   UserCircle2, 
@@ -25,9 +35,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import PatientIdForm from './Forms/PatientIdForm';
 import SafeSurgeryForm from './Forms/SafeSurgeryForm';
 import HandHygieneForm from './Forms/HandHygieneForm';
-import { getCustomLocalAudits } from '../lib/fallbackData';
 import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
-import { getAllWebhookUrls, getPendingQueue } from '../lib/googleSheetWebhook';
+import { getAllWebhookUrls, getPendingQueue, deleteAuditFromGoogleSheet } from '../lib/googleSheetWebhook';
 
 interface Props {
   user: User;
@@ -81,18 +90,22 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
   // Helper to extract Auditor Name from any audit structure
   const getAuditorName = (audit: any): string => {
-    if (audit?.auditorName && typeof audit.auditorName === 'string' && audit.auditorName.trim()) {
+    if (audit?.auditorName && typeof audit.auditorName === 'string' && audit.auditorName.trim() && audit.auditorName.trim() !== 'Auditor Sincronizado' && audit.auditorName.trim() !== '-') {
       return audit.auditorName.trim();
     }
     if (audit?.rawData) {
       const raw = audit.rawData;
-      const name = raw['06- Nome Completo do Auditor:'] || 
+      const name = raw['Nome Completo do Auditor:'] ||
+                   raw['Nome Completo do Auditor'] ||
+                   raw['06- Nome Completo do Auditor:'] || 
                    raw['06- Nome do Auditor:'] || 
                    raw['05- Nome Completo do Auditor:'] ||
                    raw['05- Nome do Auditor:'] ||
-                   raw['Nome Completo do Auditor'] ||
-                   raw['Auditor:'];
-      if (name && typeof name === 'string' && name.trim()) return name.trim();
+                   raw['04- Nome Completo do Auditor:'] ||
+                   raw['Nome do Auditor:'] ||
+                   raw['Auditor:'] ||
+                   raw['Auditor'];
+      if (name && typeof name === 'string' && name.trim() && name.trim() !== 'Auditor Sincronizado') return name.trim();
     }
     if (audit?.auditorId === user.uid) {
       return profile.name || user.displayName || user.email || 'Você';
@@ -154,13 +167,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   // Load recent audits collected by this auditor or their unit from local storage and firestore
   const loadRecentAudits = async () => {
     try {
-      const { 
-        getDeletedAuditIds, 
-        getMergedPatientAudits, 
-        getMergedSurgeryAudits, 
-        getMergedHandAudits 
-      } = await import('../lib/fallbackData');
-      
       const deletedIds = getDeletedAuditIds();
       const effectiveUnit = !isAdmin && userUnit ? userUnit : profile.defaultUnitId;
 
@@ -201,9 +207,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
       // 2. Fetch the latest from Firestore asynchronously (non-blocking)
       try {
-        const { getDocs, collection, query, limit } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
-
         const fetchCollection = async (collName: string, type: 'T01' | 'T02' | 'T03', tracerName: string) => {
           const q = query(collection(db, collName), limit(300));
           const snapshot = await getDocs(q);
@@ -268,7 +271,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
       // 1. Delete from local database / local storage
       try {
-        const { deleteAuditFromLocal } = await import('../lib/fallbackData');
         deleteAuditFromLocal(id);
       } catch (localErr) {
         console.warn("Local storage delete warning:", localErr);
@@ -277,9 +279,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       // 2. Delete from Firestore if it's not a temporary local ID
       if (id && !id.startsWith('local_')) {
         try {
-          const { doc, deleteDoc } = await import('firebase/firestore');
-          const { db } = await import('../lib/firebase');
-          
           let colName = '';
           const normalizedType = (type || existingAudit?.type || '').toUpperCase();
           if (normalizedType === 'T01' || normalizedType.includes('01')) colName = 'audits_patient_id';
@@ -296,7 +295,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
       // 3. Dispatch deletion to Destination Google Sheets Webhook
       try {
-        const { deleteAuditFromGoogleSheet } = await import('../lib/googleSheetWebhook');
         const normalizedType = (type || existingAudit?.type || '').toUpperCase();
         const tracerId = (normalizedType === 'T01' || normalizedType.includes('01')) 
           ? 'tracer_01' 
@@ -336,7 +334,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       console.error("Erro ao excluir coleta:", err);
       // Fallback guarantees local purge
       try {
-        const { deleteAuditFromLocal } = await import('../lib/fallbackData');
         deleteAuditFromLocal(id);
         window.dispatchEvent(new Event('local-data-updated'));
         triggerToast("Coleta excluída com sucesso!", "success");
@@ -376,8 +373,6 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       // Save in Firestore if online (fails silently if offline to protect user flow)
       const isQuotaExceededAtm = localStorage.getItem('firestore_quota_exceeded') === 'true';
       if (!isQuotaExceededAtm) {
-        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
         await setDoc(doc(db, 'auditors', user.uid), {
           ...profile,
           email: user.email,

@@ -2,6 +2,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { auth, signInWithGoogle, logout, db } from './lib/firebase';
 import { onAuthStateChanged, User, getRedirectResult } from 'firebase/auth';
 import { 
+  doc, 
+  setDoc, 
+  serverTimestamp, 
+  getDocs, 
+  collection, 
+  query, 
+  limit as fLimit, 
+  enableNetwork, 
+  disableNetwork 
+} from 'firebase/firestore';
+import { runAllSyncs } from './lib/autoSync';
+import { 
   LayoutDashboard, ClipboardList, LogOut, ShieldCheck, 
   HeartPulse, Activity, UserCircle, Database, 
   FileStack, Building2, CalendarDays, Bell, HelpCircle, 
@@ -76,7 +88,6 @@ export default function App() {
     setCheckingConnection(true);
     setReconnectError('');
     try {
-      const { getDocs, collection, query, limit: fLimit, enableNetwork } = await import('firebase/firestore');
       // Enable network temporarily to test connection
       await enableNetwork(db);
       
@@ -89,7 +100,6 @@ export default function App() {
       window.location.reload();
     } catch (err: any) {
       try {
-        const { disableNetwork } = await import('firebase/firestore');
         await disableNetwork(db);
       } catch (_) {}
 
@@ -227,7 +237,6 @@ export default function App() {
     try {
       const isQuotaExceededAtm = localStorage.getItem('firestore_quota_exceeded') === 'true';
       if (!isQuotaExceededAtm) {
-        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
         await setDoc(doc(db, 'auditors', user.uid), {
           ...pObj,
           email: user.email,
@@ -257,7 +266,6 @@ export default function App() {
       localStorage.removeItem('last_hash_tracer_03');
       localStorage.removeItem('last_autosync_global');
       
-      const { runAllSyncs } = await import('./lib/autoSync');
       const results = await runAllSyncs('mai./2026');
       console.log("[AutoSync] Force sync results:", results);
       
@@ -324,7 +332,6 @@ export default function App() {
         if (isManual) {
           setAutoSyncState('syncing');
         }
-        const { runAllSyncs } = await import('./lib/autoSync');
         await runAllSyncs('mai./2026');
         
         // Notify components of updated local values

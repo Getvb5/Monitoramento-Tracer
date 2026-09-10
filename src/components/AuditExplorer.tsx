@@ -398,7 +398,7 @@ export default function AuditExplorer({
       combined = combined.filter(a => {
         const uId = a.unitId || a.hospitalId || a.unidadeId;
         const unitName = HEALTH_UNITS.find(u => u.id === uId)?.name.toLowerCase() || '';
-        const auditor = a.auditorId?.toLowerCase() || '';
+        const auditor = (a.auditorName || a.auditor || a.auditorId || '').toLowerCase();
         const category = a.professionalCategory?.toLowerCase() || '';
         return unitName.includes(lower) || 
                auditor.includes(lower) || 
@@ -1369,7 +1369,7 @@ const ViewAuditModal: React.FC<ViewModalProps> = ({ audit, onClose }) => {
               </div>
               <div className="min-w-0 flex-1">
                 <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block leading-none mb-1">Auditor Responsável</span>
-                <span className="text-xs font-bold text-slate-700 block truncate">{audit.auditorId === 'SYSTEM_SYNC' ? 'Sincronizado via Planilha' : (audit.auditorName || audit.auditorId || 'Desconhecido')}</span>
+                <span className="text-xs font-bold text-slate-700 block truncate">{audit.auditorName && audit.auditorName !== 'Auditor Sincronizado' ? audit.auditorName : (audit.auditorId === 'SYSTEM_SYNC' ? 'Sincronizado via Planilha' : (audit.auditorId || 'Desconhecido'))}</span>
               </div>
             </div>
 

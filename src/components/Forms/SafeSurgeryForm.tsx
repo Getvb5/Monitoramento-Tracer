@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_02_UNITS } from '../../lib/utils';
+import { sendAuditToGoogleSheet } from '../../lib/googleSheetWebhook';
+import { saveCustomLocalAudit } from '../../lib/fallbackData';
 import { Save, ChevronLeft, ChevronRight, AlertCircle, ShieldCheck, Sparkles, CheckCircle2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -482,7 +484,6 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
 
       // 1. Immediately persist locally
       try {
-        const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
         saveCustomLocalAudit({
           id: activeDocId,
           unitId,
@@ -507,7 +508,6 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
 
       // 2. Synchronize to Firestore with real network sync
       try {
-        const { doc, setDoc } = await import('firebase/firestore');
         await Promise.race([
           setDoc(doc(db, 'audits_safe_surgery', activeDocId), {
             unitId,
@@ -540,7 +540,6 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
 
       // 3. Dispatch to destination Google Sheet Webhook if configured
       try {
-        const { sendAuditToGoogleSheet } = await import('../../lib/googleSheetWebhook');
         await sendAuditToGoogleSheet({
           id: activeDocId,
           tracerId: 'tracer_02',

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { HEALTH_UNITS, TRACER_01_UNITS } from '../../lib/utils';
-import { formatBrDate, formatBrTime, formatBrTimestamp } from '../../lib/googleSheetWebhook';
+import { formatBrDate, formatBrTime, formatBrTimestamp, sendAuditToGoogleSheet } from '../../lib/googleSheetWebhook';
+import { saveCustomLocalAudit } from '../../lib/fallbackData';
 import { Save, ChevronLeft, ChevronRight, AlertCircle, Sparkles, CheckCircle2, ClipboardCheck, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -523,7 +524,6 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
       // 1. Immediately persist locally (instantaneous - zero lag)
       try {
-        const { saveCustomLocalAudit } = await import('../../lib/fallbackData');
         saveCustomLocalAudit({
           id: activeDocId,
           unitId,
@@ -548,7 +548,6 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
       // 2. Synchronize to Firestore with real network sync
       try {
-        const { doc, setDoc } = await import('firebase/firestore');
         await Promise.race([
           setDoc(doc(db, 'audits_patient_id', activeDocId), {
             unitId,
@@ -581,7 +580,6 @@ export default function PatientIdForm({ user, onComplete, editingAudit, isAdmin 
 
       // 3. Dispatch to destination Google Sheet Webhook if configured
       try {
-        const { sendAuditToGoogleSheet } = await import('../../lib/googleSheetWebhook');
         await sendAuditToGoogleSheet({
           id: activeDocId,
           tracerId: 'tracer_01',

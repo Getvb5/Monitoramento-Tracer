@@ -6,6 +6,7 @@ import { HEALTH_UNITS } from '../lib/utils';
 import { useAuditsData } from '../context/DataContext';
 import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
 import { getAllWebhookUrls, getPendingQueue } from '../lib/googleSheetWebhook';
+import { syncSingleTracer } from '../lib/autoSync';
 
 const TRACER_CONFIGS = [
   { 
@@ -105,7 +106,6 @@ export default function DataManagement() {
     addLog(`Iniciando sincronização: ${config.name}...`, 'info');
 
     try {
-      const { syncSingleTracer } = await import('../lib/autoSync');
       const res = await syncSingleTracer(tracerId, url, 'mai./2026');
       if (res.success) {
         if (res.imported > 0) {

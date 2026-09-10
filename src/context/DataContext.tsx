@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, onSnapshot, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, deleteDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { deleteAuditFromGoogleSheet } from '../lib/googleSheetWebhook';
 import {
   getMergedPatientAudits,
   getMergedSurgeryAudits,
@@ -204,7 +205,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 3. Dispatch deletion to Destination Google Sheets Webhook
     try {
-      const { deleteAuditFromGoogleSheet } = await import('../lib/googleSheetWebhook');
       const tracerId = type === 'T01' ? 'tracer_01' : type === 'T02' ? 'tracer_02' : 'tracer_03';
       await deleteAuditFromGoogleSheet({
         id,
@@ -241,7 +241,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Try Firestore save asynchronously
     try {
-      const { setDoc, doc, serverTimestamp } = await import('firebase/firestore');
       const collName = audit.type === 'T01' ? 'audits_patient_id' : audit.type === 'T02' ? 'audits_safe_surgery' : 'audits_hand_hygiene';
       await setDoc(doc(db, collName, audit.id), {
         ...audit,

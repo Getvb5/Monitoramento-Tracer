@@ -214,7 +214,46 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
         }
       }
       
-      const auditorRaw = row['Nome Completo do Auditor:'] || row['Nome Completo do Auditor'] || row['Nome do Auditor:'] || row['Nome do Auditor'] || row['Auditor'] || 'Auditor Sincronizado';
+      const auditorCandidates = [
+        row['Nome Completo do Auditor:'],
+        row['Nome Completo do Auditor'],
+        row['06- Nome Completo do Auditor:'],
+        row['06- Nome Completo do Auditor'],
+        row['05- Nome Completo do Auditor:'],
+        row['05- Nome Completo do Auditor'],
+        row['04- Nome Completo do Auditor:'],
+        row['04- Nome Completo do Auditor'],
+        row['Nome Completo do Auditor: '],
+        row['Nome do Auditor:'],
+        row['Nome do Auditor'],
+        row['Auditor:'],
+        row['Auditor'],
+        cleanRow['Nome Completo do Auditor:'],
+        cleanRow['Nome Completo do Auditor'],
+        findSpecificValue(['auditor'], ['setor', 'unidade']),
+        findValue(['auditor'])
+      ];
+      let auditorRaw = '';
+      for (const c of auditorCandidates) {
+        if (c && typeof c === 'string' && c.trim() && c.trim() !== '-' && c.trim() !== 'Auditor Sincronizado') {
+          auditorRaw = c.trim();
+          break;
+        }
+      }
+      if (!auditorRaw) {
+        for (const [k, v] of Object.entries(row)) {
+          if (k.toLowerCase().includes('auditor') && !k.toLowerCase().includes('setor') && !k.toLowerCase().includes('unidade')) {
+            if (v && typeof v === 'string' && v.trim() && v.trim() !== '-' && v.trim() !== 'Auditor Sincronizado') {
+              auditorRaw = v.trim();
+              break;
+            }
+          }
+        }
+      }
+      if (!auditorRaw) {
+        auditorRaw = 'Auditor de Campo';
+      }
+
       const patientRaw = row['Nome Completo do Paciente:'] || row['Nome Completo do Paciente'] || row['Paciente:'] || row['Paciente'] || 'Paciente Auditado';
       const mrnRaw = row['Nº do Prontuário do Paciente:'] || row['Nº do Prontuário do Paciente'] || row['Prontuário:'] || row['Prontuário'] || '-';
       const sectorRaw = row['Setor Auditado:'] || row['Setor Auditado'] || row['Setor:'] || row['Setor'] || row['Tipo de procedimento:'] || '-';
@@ -316,7 +355,11 @@ export async function syncSingleTracer(tracerId: string, url: string, competenci
           }
           batchPromises.push(batch.commit());
         }
-        await Promise.all(batchPromises);
+        // Protect with an 8-second race so offline Firestore does not block or throw
+        await Promise.race([
+          Promise.all(batchPromises),
+          new Promise(resolve => setTimeout(resolve, 8000))
+        ]);
       } catch (err: any) {
         console.warn(`[AutoSync] Batch write to Firestore for ${tracerId} notice:`, err?.message || err);
       }
