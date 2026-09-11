@@ -20,7 +20,7 @@ import {
   User as UserIcon, ChevronDown, Menu, X, SlidersHorizontal,
   FolderLock, RefreshCw, UserCheck, ClipboardCheck, Layers,
   Users, Filter, ChevronRight, CheckCircle2, Sparkles, BookOpen,
-  AlertCircle, ExternalLink, Loader2
+  AlertCircle, ExternalLink, Loader2, FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Dashboard from './components/Dashboard';
@@ -30,6 +30,8 @@ import SchedulesSync from './components/SchedulesSync';
 import ColetaDigital from './components/ColetaDigital';
 import AuditorUnitModal from './components/AuditorUnitModal';
 import { GoogleDocsGuideModal } from './components/GoogleDocsGuideModal';
+import GoogleSheetWebhookModal from './components/GoogleSheetWebhookModal';
+import { getPendingQueue } from './lib/googleSheetWebhook';
 import { ADMIN_EMAILS, USER_UNIT_MAPPING, HEALTH_UNITS } from './lib/utils';
 import loginBg from './assets/images/recife_login_bg_1780339628886.png';
 
@@ -44,6 +46,20 @@ export default function App() {
   const [autoSyncState, setAutoSyncState] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(() => getPendingQueue().length);
+
+  useEffect(() => {
+    const updateQueue = () => {
+      setPendingQueueCount(getPendingQueue().length);
+    };
+    window.addEventListener('webhook-urls-updated', updateQueue);
+    window.addEventListener('pending-queue-updated', updateQueue);
+    return () => {
+      window.removeEventListener('webhook-urls-updated', updateQueue);
+      window.removeEventListener('pending-queue-updated', updateQueue);
+    };
+  }, []);
 
   const handleGoogleLogin = async () => {
     if (isLoggingIn) return;
@@ -783,6 +799,13 @@ export default function App() {
                 label="INICIAR TRACER"
                 isAction
               />
+              <SidebarButton 
+                active={false} 
+                onClick={() => setIsWebhookModalOpen(true)}
+                icon={<FileSpreadsheet className="w-4 h-4 text-emerald-300" />}
+                label="Planilha Destino"
+                badge={pendingQueueCount > 0 ? `${pendingQueueCount}` : undefined}
+              />
             </div>
           )}
 
@@ -845,6 +868,13 @@ export default function App() {
               onClick={() => setIsGuideModalOpen(true)}
               icon={<BookOpen className="w-4 h-4 text-blue-300" />}
               label="Manual do Sistema"
+            />
+            <SidebarButton 
+              active={false} 
+              onClick={() => setIsWebhookModalOpen(true)}
+              icon={<FileSpreadsheet className="w-4 h-4 text-emerald-300" />}
+              label="Planilha Destino (Sheets)"
+              badge={pendingQueueCount > 0 ? `${pendingQueueCount}` : undefined}
             />
             {isAdmin && (
               <SidebarButton 
@@ -940,6 +970,13 @@ export default function App() {
                       icon={<ClipboardCheck className="w-4 h-4" />}
                       label="INICIAR TRACER"
                       isAction
+                    />
+                    <SidebarButton 
+                      active={false} 
+                      onClick={() => { setIsWebhookModalOpen(true); setMobileSidebarOpen(false); }}
+                      icon={<FileSpreadsheet className="w-4 h-4 text-emerald-300" />}
+                      label="Planilha Destino"
+                      badge={pendingQueueCount > 0 ? `${pendingQueueCount}` : undefined}
                     />
                   </div>
                 )}
@@ -1186,6 +1223,23 @@ export default function App() {
                           >
                             <UserCheck className="w-4 h-4 text-slate-400" />
                             Perfil & INICIAR TRACER
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setUserDropdownOpen(false);
+                              setIsWebhookModalOpen(true);
+                            }}
+                            className="w-full px-3 py-2 hover:bg-emerald-50 text-emerald-800 hover:text-emerald-950 text-[10px] font-extrabold uppercase tracking-wide rounded-lg text-left flex items-center justify-between cursor-pointer"
+                          >
+                            <span className="flex items-center gap-2">
+                              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                              Planilha Destino (Google Sheets)
+                            </span>
+                            {pendingQueueCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-[8px] font-black">
+                                {pendingQueueCount}
+                              </span>
+                            )}
                           </button>
                           <button 
                             onClick={() => {
@@ -1770,6 +1824,12 @@ export default function App() {
       <GoogleDocsGuideModal 
         isOpen={isGuideModalOpen}
         onClose={() => setIsGuideModalOpen(false)}
+      />
+
+      {/* Google Sheets Destination Webhook Modal (Accessible to Auditors & Admins) */}
+      <GoogleSheetWebhookModal
+        isOpen={isWebhookModalOpen}
+        onClose={() => setIsWebhookModalOpen(false)}
       />
 
     </div>

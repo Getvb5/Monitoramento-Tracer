@@ -12,6 +12,50 @@ export interface SheetWebhookConfig {
   tracer_03: string;
 }
 
+export interface SendAuditResult {
+  success: boolean;
+  message: string;
+  queued?: boolean;
+  sheetName?: string;
+  rowNumber?: number;
+}
+
+/**
+ * Validates a Google Apps Script Webhook URL and flags common user mistakes.
+ */
+export function validateWebhookUrl(url?: string): { valid: boolean; error?: string; warning?: string; fixedUrl?: string } {
+  if (!url || !url.trim()) {
+    return { valid: false, error: 'URL não configurada no sistema.' };
+  }
+  const clean = url.trim();
+  if (clean.includes('docs.google.com/spreadsheets')) {
+    return {
+      valid: false,
+      error: 'Você colou o link de visualização da planilha (docs.google.com). É necessário criar uma implantação no Apps Script (Extensões > Apps Script > Implantar) e colar a URL do Web App gerada (script.google.com/.../exec).'
+    };
+  }
+  if (clean.endsWith('/dev')) {
+    return {
+      valid: true,
+      fixedUrl: clean.replace(/\/dev$/, '/exec'),
+      warning: 'Aviso: A URL terminava com "/dev" e foi corrigida para "/exec" (a versão /dev requer login e não grava dados).'
+    };
+  }
+  if (!clean.startsWith('https://script.google.com/macros/s/')) {
+    return {
+      valid: false,
+      error: 'A URL informada não parece ser um Web App do Google Apps Script (deve começar com https://script.google.com/macros/s/... e terminar com /exec).'
+    };
+  }
+  if (!clean.endsWith('/exec')) {
+    return {
+      valid: true,
+      warning: 'Atenção: Para garantir funcionamento contínuo, a URL do Web App deve terminar com "/exec".'
+    };
+  }
+  return { valid: true };
+}
+
 /**
  * Formats ISO or YYYY-MM-DD string into standard Brazilian Date (DD/MM/YYYY)
  */
@@ -103,25 +147,40 @@ export function initWebhookCloudSync() {
 // Auto-run cloud sync
 initWebhookCloudSync();
 
-export function getWebhookUrl(tracerId: 'tracer_01' | 'tracer_02' | 'tracer_03' | string): string {
+export function getWebhookUrl(tracerId: 'tracer_01' | 'tracer_02' | 'tracer_03' | string, allowFallback: boolean = true): string {
   const normId = tracerId === '01' || tracerId === 'T01' ? 'tracer_01' : tracerId === '02' || tracerId === 'T02' ? 'tracer_02' : tracerId === '03' || tracerId === 'T03' ? 'tracer_03' : tracerId;
   const key = STORAGE_KEYS[normId] || `url_webhook_${normId}`;
   
-  if (inMemoryUrls[normId as keyof SheetWebhookConfig]) {
-    return inMemoryUrls[normId as keyof SheetWebhookConfig];
+  let raw = inMemoryUrls[normId as keyof SheetWebhookConfig] || (typeof localStorage !== 'undefined' ? localStorage.getItem(key) || '' : '');
+  
+  // Smart fallback: if this specific tracer has no dedicated URL, use any configured tracer URL
+  if ((!raw || !raw.trim()) && allowFallback) {
+    raw = inMemoryUrls.tracer_01 || inMemoryUrls.tracer_02 || inMemoryUrls.tracer_03 ||
+      (typeof localStorage !== 'undefined' ? 
+        localStorage.getItem(STORAGE_KEYS.tracer_01) || 
+        localStorage.getItem(STORAGE_KEYS.tracer_02) || 
+        localStorage.getItem(STORAGE_KEYS.tracer_03) || 
+        localStorage.getItem('url_webhook_global') || '' : '');
   }
   
-  const fromStorage = typeof localStorage !== 'undefined' ? localStorage.getItem(key) || '' : '';
-  if (fromStorage && (normId in inMemoryUrls)) {
-    inMemoryUrls[normId as keyof SheetWebhookConfig] = fromStorage;
+  if (raw && raw.trim()) {
+    let clean = raw.trim();
+    if (clean.endsWith('/dev')) {
+      clean = clean.replace(/\/dev$/, '/exec');
+    }
+    return clean;
   }
-  return fromStorage;
+  
+  return '';
 }
 
 export async function setWebhookUrl(tracerId: 'tracer_01' | 'tracer_02' | 'tracer_03' | string, url: string): Promise<void> {
   const normId = tracerId === '01' || tracerId === 'T01' ? 'tracer_01' : tracerId === '02' || tracerId === 'T02' ? 'tracer_02' : tracerId === '03' || tracerId === 'T03' ? 'tracer_03' : tracerId;
   const key = STORAGE_KEYS[normId] || `url_webhook_${normId}`;
-  const cleanUrl = url ? url.trim() : '';
+  let cleanUrl = url ? url.trim() : '';
+  if (cleanUrl.endsWith('/dev')) {
+    cleanUrl = cleanUrl.replace(/\/dev$/, '/exec');
+  }
 
   // 1. Update in-memory & LocalStorage immediately
   if (!cleanUrl) {
@@ -150,11 +209,49 @@ export async function setWebhookUrl(tracerId: 'tracer_01' | 'tracer_02' | 'trace
   }
 }
 
+export async function setAllWebhookUrls(config: SheetWebhookConfig): Promise<void> {
+  const sanitize = (u?: string) => {
+    let s = (u || '').trim();
+    if (s.endsWith('/dev')) s = s.replace(/\/dev$/, '/exec');
+    return s;
+  };
+
+  const cleanConfig: SheetWebhookConfig = {
+    tracer_01: sanitize(config.tracer_01),
+    tracer_02: sanitize(config.tracer_02),
+    tracer_03: sanitize(config.tracer_03)
+  };
+
+  inMemoryUrls = { ...cleanConfig };
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_KEYS.tracer_01, cleanConfig.tracer_01);
+    localStorage.setItem(STORAGE_KEYS.tracer_02, cleanConfig.tracer_02);
+    localStorage.setItem(STORAGE_KEYS.tracer_03, cleanConfig.tracer_03);
+  }
+  window.dispatchEvent(new Event('webhook-urls-updated'));
+
+  // 2. Persist to Firestore for all connected devices (with timeout to prevent freezing)
+  try {
+    const configDocRef = doc(db, 'system_config', 'webhook_urls');
+    Promise.race([
+      setDoc(configDocRef, {
+        ...cleanConfig,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+    ]).catch(err => {
+      console.warn('[GoogleSheetWebhook] Cloud sync notice (saved locally):', err?.message || err);
+    });
+  } catch (err) {
+    console.warn('[GoogleSheetWebhook] Failed to save webhook URLs to Firestore (saved locally):', err);
+  }
+}
+
 export function getAllWebhookUrls(): SheetWebhookConfig {
   return {
-    tracer_01: getWebhookUrl('tracer_01'),
-    tracer_02: getWebhookUrl('tracer_02'),
-    tracer_03: getWebhookUrl('tracer_03')
+    tracer_01: getWebhookUrl('tracer_01', false),
+    tracer_02: getWebhookUrl('tracer_02', false),
+    tracer_03: getWebhookUrl('tracer_03', false)
   };
 }
 
@@ -166,6 +263,11 @@ export interface PendingAuditItem {
   rawData: Record<string, any>;
   patientName?: string;
   unitName?: string;
+  auditorName?: string;
+  medicalRecordNumber?: string;
+  tracerDate?: string;
+  tracerTime?: string;
+  sector?: string;
 }
 
 export function getPendingQueue(): PendingAuditItem[] {
@@ -184,6 +286,9 @@ export function saveToQueue(item: PendingAuditItem): void {
     const filtered = queue.filter(q => q.id !== item.id);
     filtered.push(item);
     localStorage.setItem(QUEUE_KEY, JSON.stringify(filtered));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pending-queue-updated'));
+    }
   } catch (e) {
     console.error('[GoogleSheetWebhook] Failed to save to pending queue:', e);
   }
@@ -194,6 +299,9 @@ export function removeFromQueue(id: string): void {
     const queue = getPendingQueue();
     const filtered = queue.filter(q => q.id !== id);
     localStorage.setItem(QUEUE_KEY, JSON.stringify(filtered));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('pending-queue-updated'));
+    }
   } catch (e) {
     console.error('[GoogleSheetWebhook] Failed to remove from queue:', e);
   }
@@ -214,7 +322,7 @@ export async function sendAuditToGoogleSheet(audit: {
   tracerDate?: string;
   tracerTime?: string;
   sector?: string;
-}): Promise<{ success: boolean; message: string; queued?: boolean }> {
+}): Promise<SendAuditResult> {
   const normTracerId = audit.tracerId === '01' || audit.tracerId === 'T01' ? 'tracer_01' : audit.tracerId === '02' || audit.tracerId === 'T02' ? 'tracer_02' : audit.tracerId === '03' || audit.tracerId === 'T03' ? 'tracer_03' : audit.tracerId;
   const webhookUrl = getWebhookUrl(normTracerId);
 
@@ -253,8 +361,10 @@ export async function sendAuditToGoogleSheet(audit: {
     enrichedData['Setor Auditado:'] = audit.sector;
   }
 
-  if (!webhookUrl) {
-    // Webhook not configured yet; save in pending queue in case user configures it later
+  // Validation
+  const validation = validateWebhookUrl(webhookUrl);
+  if (!validation.valid) {
+    // Webhook not configured yet or invalid; save in pending queue in case user configures it later
     saveToQueue({
       id: audit.id,
       tracerId: normTracerId,
@@ -262,14 +372,21 @@ export async function sendAuditToGoogleSheet(audit: {
       timestamp: new Date().toISOString(),
       rawData: enrichedData,
       patientName: audit.patientName,
-      unitName: audit.unitName
+      unitName: audit.unitName,
+      auditorName: audit.auditorName,
+      medicalRecordNumber: audit.medicalRecordNumber,
+      tracerDate: audit.tracerDate,
+      tracerTime: audit.tracerTime,
+      sector: audit.sector
     });
     return {
       success: false,
-      message: 'URL do Webhook da Planilha Destino não configurada. A coleta foi salva na fila pendente.',
+      message: validation.error || 'URL do Webhook da Planilha Destino não configurada. A coleta foi guardada na fila de pendências.',
       queued: true
     };
   }
+
+  const effectiveUrl = validation.fixedUrl || webhookUrl;
 
   const payload = {
     action: 'add_row',
@@ -287,25 +404,32 @@ export async function sendAuditToGoogleSheet(audit: {
     data: enrichedData
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 9000);
+
   try {
-    // Send payload as plain text / JSON string to avoid CORS preflight issues with Google Apps Script
-    await fetch(webhookUrl, {
+    // Mode 'no-cors' is essential for standard Google Apps Script Web Apps to prevent hanging and CORS redirect errors
+    await fetch(effectiveUrl, {
       method: 'POST',
-      mode: 'no-cors', // Essential for Google Apps Script Web Apps
+      mode: 'no-cors',
+      cache: 'no-cache',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     // Remove from pending queue if present
     removeFromQueue(audit.id);
 
     return {
       success: true,
-      message: 'Coleta enviada com sucesso para a planilha destino!'
+      message: 'Coleta gravada com sucesso na planilha destino!'
     };
   } catch (err: any) {
+    clearTimeout(timeoutId);
     console.warn('[GoogleSheetWebhook] Send failed, saving to retry queue:', err);
     saveToQueue({
       id: audit.id,
@@ -314,12 +438,103 @@ export async function sendAuditToGoogleSheet(audit: {
       timestamp: new Date().toISOString(),
       rawData: enrichedData,
       patientName: audit.patientName,
-      unitName: audit.unitName
+      unitName: audit.unitName,
+      auditorName: audit.auditorName,
+      medicalRecordNumber: audit.medicalRecordNumber,
+      tracerDate: audit.tracerDate,
+      tracerTime: audit.tracerTime,
+      sector: audit.sector
     });
+
+    const isTimeout = err?.name === 'AbortError' || err?.message?.includes('aborted');
     return {
       success: false,
-      message: `Erro no envio: ${err?.message || 'Falha de rede'}. Registro salvo na fila de reenvio.`,
+      message: isTimeout 
+        ? 'Tempo limite de conexão esgotado (9s). A coleta foi guardada na fila de pendências para reenvio automático.'
+        : `Erro no envio: ${err?.message || 'Falha de rede'}. Registro guardado na fila de reenvio.`,
       queued: true
+    };
+  }
+}
+
+/**
+ * Dedicated, lightweight connection tester that does NOT pollute the pending audit queue.
+ * Protected by an 8-second AbortController timeout to guarantee it never hangs in an infinite loop.
+ */
+export async function testWebhookConnection(
+  tracerId: 'tracer_01' | 'tracer_02' | 'tracer_03' | string,
+  explicitUrl?: string
+): Promise<{ success: boolean; message: string }> {
+  const normTracerId = tracerId === '01' || tracerId === 'T01' ? 'tracer_01' : tracerId === '02' || tracerId === 'T02' ? 'tracer_02' : tracerId === '03' || tracerId === 'T03' ? 'tracer_03' : tracerId;
+  const targetUrl = (explicitUrl || getWebhookUrl(normTracerId, true) || '').trim();
+
+  const val = validateWebhookUrl(targetUrl);
+  if (!val.valid) {
+    return {
+      success: false,
+      message: val.error || 'URL do Webhook não configurada ou inválida.'
+    };
+  }
+
+  const effectiveUrl = val.fixedUrl || targetUrl;
+
+  const testPayload = {
+    action: 'add_row',
+    id: 'test_' + Date.now(),
+    tracerId: normTracerId,
+    type: normTracerId === 'tracer_01' ? 'T01' : normTracerId === 'tracer_02' ? 'T02' : 'T03',
+    patientName: 'TESTE DE CONEXÃO DO SISTEMA',
+    unitName: 'Hospital / Unidade de Teste',
+    auditorName: 'Auditor do Sistema (Teste)',
+    medicalRecordNumber: '000000',
+    tracerDate: new Date().toLocaleDateString('pt-BR'),
+    tracerTime: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    sector: 'Teste de Integração Webhook',
+    createdAt: new Date().toISOString(),
+    data: {
+      'Carimbo de data/hora': new Date().toLocaleString('pt-BR'),
+      'Nome do Hospital/Maternidade': 'Hospital / Unidade de Teste',
+      'Nome Completo do Auditor:': 'Auditor do Sistema (Teste)',
+      'Nome Completo do Paciente:': 'PACIENTE TESTE DE CONEXÃO',
+      'Nº do Prontuário do Paciente:': '000000',
+      'Data do Tracer:': new Date().toLocaleDateString('pt-BR'),
+      'Horário do Início do Tracer:': new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      'Setor Auditado:': 'Teste de Integração Webhook',
+      'Status': 'CONEXÃO BEM-SUCEDIDA!'
+    }
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    await fetch(effectiveUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      cache: 'no-cache',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify(testPayload),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    return {
+      success: true,
+      message: 'Conexão bem-sucedida! Linha de teste transmitida com sucesso para o Google Sheets.'
+    };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err?.name === 'AbortError' || err?.message?.includes('aborted')) {
+      return {
+        success: false,
+        message: 'Tempo limite esgotado (8s). O Google Apps Script demorou muito para responder. Verifique se a URL está correta e se a implantação foi configurada como "Qualquer pessoa".'
+      };
+    }
+    return {
+      success: false,
+      message: `Falha na transmissão: ${err?.message || 'Erro de rede ou conexão bloqueada'}.`
     };
   }
 }
@@ -357,21 +572,28 @@ export async function deleteAuditFromGoogleSheet(audit: {
     data: audit.rawData || {}
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
   try {
     await fetch(webhookUrl, {
       method: 'POST',
       mode: 'no-cors',
+      cache: 'no-cache',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     return {
       success: true,
       message: 'Comando de exclusão transmitido para a planilha destino.'
     };
   } catch (err: any) {
+    clearTimeout(timeoutId);
     console.warn('[GoogleSheetWebhook] Delete request failed:', err);
     return {
       success: false,
@@ -397,10 +619,14 @@ export async function flushPendingQueue(): Promise<{ sent: number; total: number
       continue;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     try {
       await fetch(webhookUrl, {
         method: 'POST',
         mode: 'no-cors',
+        cache: 'no-cache',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8'
         },
@@ -413,11 +639,14 @@ export async function flushPendingQueue(): Promise<{ sent: number; total: number
           unitName: item.unitName || '',
           createdAt: item.timestamp,
           data: item.rawData
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       removeFromQueue(item.id);
       sent++;
     } catch {
+      clearTimeout(timeoutId);
       errors++;
     }
   }
@@ -441,17 +670,18 @@ export function getAppsScriptCode(): string {
  * CÓDIGO DO GOOGLE APPS SCRIPT PARA SINCRONIZAÇÃO COMPLETA DOS TRACERS
  * (GRAVAÇÃO AUTOMÁTICA EM TEMPO REAL + EXCLUSÃO INTELIGENTE DE LINHAS)
  * 
- * INSTRUÇÕES SIMPLES (1 Minuto):
+ * INSTRUÇÕES RÁPIDAS (1 Minuto):
  * 1. Abra a sua Planilha no Google Sheets onde deseja receber os dados.
  * 2. No menu superior da planilha, clique em: Extensões > Apps Script.
- * 3. Apague QUALQUER código existente e COLE este código completo.
+ * 3. Apague QUALQUER código existente no editor e COLE este código completo.
  * 4. Clique no botão azul "Implantar" (Deploy) no canto superior direito > "Gerenciar Implantações" ou "Nova Implantação".
  * 5. Se for Nova Implantação, escolha "App da Web" (Web App).
- * 6. Configure exatamente assim:
+ * 6. Configure rigorosamente assim:
  *    - Descrição: "Webhook Tracers Hospitalares"
  *    - Executar como: "Eu" (seu e-mail)
- *    - Quem tem acesso: "Qualquer pessoa" (Anyone) -> ESSENCIAL para receber do app!
- * 7. Clique em "Implantar" (ou "Atualizar"), copie a URL gerada (termina com /exec) e cole no sistema.
+ *    - Quem tem acesso: "Qualquer pessoa" (Anyone) -> ESSENCIAL! Se deixar "Apenas eu", a planilha não recebe dados do app!
+ * 7. Clique em "Implantar" (ou "Atualizar").
+ * 8. Copie a "URL do App da Web" gerada (termina com /exec) e cole no sistema.
  */
 
 function doPost(e) {
@@ -461,18 +691,6 @@ function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     
-    // Identificação inteligente da aba de respostas do formulário
-    var sheet = ss.getSheetByName("Form_Responses") || 
-                ss.getSheetByName("Form Responses 1") || 
-                ss.getSheetByName("Respostas ao formulário 1") || 
-                ss.getSheetByName("Respostas ao formulario 1") || 
-                ss.getSheetByName("Respostas") || 
-                ss.getSheetByName("Tracer 01") || 
-                ss.getSheetByName("Tracer 02") || 
-                ss.getSheetByName("Tracer 03") || 
-                ss.getActiveSheet() || 
-                ss.getSheets()[0];
-                
     if (!e || !e.postData || !e.postData.contents) {
       return ContentService.createTextOutput(JSON.stringify({ 
         status: 'error', 
@@ -482,6 +700,68 @@ function doPost(e) {
     
     var postData = JSON.parse(e.postData.contents);
     var action = postData.action || 'add_row';
+    var tracerId = String(postData.tracerId || '').toLowerCase();
+    var tracerType = String(postData.type || '').toUpperCase();
+    var allSheets = ss.getSheets();
+    
+    // Normalização de nomes de abas
+    function cleanSheetName(val) {
+      if (!val) return '';
+      return String(val)
+        .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+    }
+
+    var sheet = null;
+    
+    // 1. Identificação inteligente da aba correta de acordo com o Tracer
+    if (tracerId.indexOf('01') !== -1 || tracerType === 'T01') {
+      for (var i = 0; i < allSheets.length; i++) {
+        var sn = cleanSheetName(allSheets[i].getName());
+        if (sn.indexOf('tracer 01') !== -1 || sn.indexOf('tracer 1') !== -1 || sn.indexOf('t01') !== -1 || 
+            sn.indexOf('beira leito') !== -1 || sn.indexOf('identificacao') !== -1 || 
+            sn.indexOf('respostas ao formulario 1') !== -1 || sn.indexOf('form responses 1') !== -1) {
+          sheet = allSheets[i];
+          break;
+        }
+      }
+    } else if (tracerId.indexOf('02') !== -1 || tracerType === 'T02') {
+      for (var i = 0; i < allSheets.length; i++) {
+        var sn = cleanSheetName(allSheets[i].getName());
+        if (sn.indexOf('tracer 02') !== -1 || sn.indexOf('tracer 2') !== -1 || sn.indexOf('t02') !== -1 || 
+            sn.indexOf('cirurg') !== -1 || 
+            sn.indexOf('respostas ao formulario 2') !== -1 || sn.indexOf('form responses 2') !== -1) {
+          sheet = allSheets[i];
+          break;
+        }
+      }
+    } else if (tracerId.indexOf('03') !== -1 || tracerType === 'T03') {
+      for (var i = 0; i < allSheets.length; i++) {
+        var sn = cleanSheetName(allSheets[i].getName());
+        if (sn.indexOf('tracer 03') !== -1 || sn.indexOf('tracer 3') !== -1 || sn.indexOf('t03') !== -1 || 
+            sn.indexOf('medicac') !== -1 || sn.indexOf('higiene') !== -1 || 
+            sn.indexOf('respostas ao formulario 3') !== -1 || sn.indexOf('form responses 3') !== -1) {
+          sheet = allSheets[i];
+          break;
+        }
+      }
+    }
+    
+    // Fallbacks padrão se não houver aba específica
+    if (!sheet) {
+      sheet = ss.getSheetByName("Form_Responses") || 
+              ss.getSheetByName("Form Responses 1") || 
+              ss.getSheetByName("Respostas ao formulário 1") || 
+              ss.getSheetByName("Respostas ao formulario 1") || 
+              ss.getSheetByName("Respostas") || 
+              ss.getSheetByName("Página1") || 
+              ss.getSheetByName("Página 1") || 
+              ss.getActiveSheet() || 
+              allSheets[0];
+    }
     
     // Helper para formatar data/hora nativa do Google Sheets: "DD/MM/YYYY HH:mm:ss"
     function formatDateTime(d) {
@@ -509,7 +789,6 @@ function doPost(e) {
       var targetId = String(postData.id || '').trim();
       var targetPatient = cleanStr(postData.patientName || '');
       var targetUnit = cleanStr(postData.unitName || '');
-      var targetTimestamp = String(postData.timestamp || '').trim();
       
       var dataRange = sheet.getDataRange();
       var values = dataRange.getValues();
@@ -524,7 +803,6 @@ function doPost(e) {
       var deletedRowsCount = 0;
       var patientColIdx = -1;
       var unitColIdx = -1;
-      var timeColIdx = -1;
       
       for (var h = 0; h < headers.length; h++) {
         var nH = cleanStr(headers[h]);
@@ -534,16 +812,13 @@ function doPost(e) {
         if (unitColIdx === -1 && (nH.indexOf('hospital') !== -1 || nH.indexOf('unidade') !== -1 || nH.indexOf('maternidade') !== -1)) {
           unitColIdx = h;
         }
-        if (timeColIdx === -1 && (nH.indexOf('carimbo') !== -1 || nH.indexOf('data e hora') !== -1 || nH.indexOf('timestamp') !== -1)) {
-          timeColIdx = h;
-        }
       }
       
       for (var r = values.length - 1; r >= 1; r--) {
         var row = values[r];
         var isMatch = false;
         
-        // Match por ID se existir em qualquer coluna da linha
+        // Match por ID se gravado em coluna
         if (targetId) {
           for (var c = 0; c < row.length; c++) {
             if (String(row[c]).trim() === targetId) {
@@ -672,13 +947,16 @@ function doPost(e) {
       newRow.push(val);
     }
     
-    // Grava a linha completa na planilha
+    // Grava a linha completa na aba correta da planilha
     sheet.appendRow(newRow);
     SpreadsheetApp.flush();
+    var lastRowNow = sheet.getLastRow();
     
     return ContentService.createTextOutput(JSON.stringify({ 
       status: 'success', 
-      message: 'Linha adicionada com sucesso na planilha destino!' 
+      sheetName: sheet.getName(),
+      rowNumber: lastRowNow,
+      message: 'Linha adicionada com sucesso na aba "' + sheet.getName() + '" (linha ' + lastRowNow + ')!' 
     })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
@@ -692,6 +970,46 @@ function doPost(e) {
 }
 
 function doGet(e) {
-  return ContentService.createTextOutput("Webhook de Sincronização dos Tracers está ativo e pronto para gravação em tempo real!");
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheets = ss.getSheets().map(function(s) { 
+      return { name: s.getName(), rows: s.getLastRow(), cols: s.getLastColumn() }; 
+    });
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'online',
+      spreadsheetTitle: ss.getName(),
+      sheets: sheets,
+      message: 'Webhook dos Tracers está ativo e pronto para gravação em tempo real!'
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput("Webhook de Sincronização dos Tracers está ativo!");
+  }
+}
+
+function testarNoAppsScript() {
+  var fakeEvent = {
+    postData: {
+      contents: JSON.stringify({
+        action: 'add_row',
+        tracerId: 'tracer_01',
+        type: 'T01',
+        unitName: 'Hospital Geral (Teste do Editor)',
+        patientName: 'Paciente Teste Editor',
+        auditorName: 'Auditor do Sistema',
+        medicalRecordNumber: '000123',
+        tracerDate: '10/09/2026',
+        tracerTime: '12:00:00',
+        sector: 'Enfermaria',
+        data: {
+          'Carimbo de data/hora': '10/09/2026 12:00:00',
+          'Nome do Hospital/Maternidade': 'Hospital Geral (Teste do Editor)',
+          'Nome Completo do Auditor:': 'Auditor do Sistema',
+          'Nome Completo do Paciente:': 'Paciente Teste Editor'
+        }
+      })
+    }
+  };
+  var res = doPost(fakeEvent);
+  Logger.log(res.getContent());
 }`;
 }

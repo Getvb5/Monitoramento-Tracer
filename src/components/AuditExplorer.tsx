@@ -10,9 +10,12 @@ import {
   CheckCircle2, XCircle, AlertTriangle, Building2,
   Calendar, User as UserIcon, Tag, Database,
   Table as TableIcon, LayoutList, Pencil, Trash2, X, SlidersHorizontal, Eye,
-  FileSpreadsheet
+  FileSpreadsheet, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth } from '../lib/firebase';
+import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
+import { sendAuditToGoogleSheet, getPendingQueue } from '../lib/googleSheetWebhook';
 
 export const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
@@ -237,6 +240,19 @@ export default function AuditExplorer({
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
+  const [sendingToSheetId, setSendingToSheetId] = useState<string | null>(null);
+  const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(() => getPendingQueue().length);
+
+  useEffect(() => {
+    const updateQueue = () => setPendingQueueCount(getPendingQueue().length);
+    window.addEventListener('pending-queue-updated', updateQueue);
+    window.addEventListener('webhook-urls-updated', updateQueue);
+    return () => {
+      window.removeEventListener('pending-queue-updated', updateQueue);
+      window.removeEventListener('webhook-urls-updated', updateQueue);
+    };
+  }, []);
 
   const triggerToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -245,11 +261,44 @@ export default function AuditExplorer({
     }, 4000);
   };
 
+  const handleSendToGoogleSheet = async (audit: any) => {
+    if (!audit) return;
+    setSendingToSheetId(audit.id);
+    try {
+      const tracerId = audit.type === 'T01' ? 'tracer_01' : audit.type === 'T02' ? 'tracer_02' : 'tracer_03';
+      const raw = getAuditRawData(audit);
+      const res = await sendAuditToGoogleSheet({
+        id: audit.id,
+        tracerId,
+        type: audit.type,
+        rawData: raw,
+        patientName: audit.patientName || raw['Nome do Paciente'] || raw['q4_paciente'] || raw['Nome Completo do Paciente:'] || '',
+        unitName: audit.unitName || audit.unitId || raw['Unidade de Saúde'] || raw['Nome do Hospital/Maternidade:'] || '',
+        auditorName: audit.auditorName || raw['Nome do Auditor'] || raw['q5_auditor'] || raw['Nome Completo do Auditor:'] || '',
+        medicalRecordNumber: audit.medicalRecordNumber || raw['Prontuário'] || raw['Nº do Prontuário do Paciente:'] || '',
+        tracerDate: audit.tracerDate || raw['Data da Auditoria'] || raw['Data do Tracer:'] || '',
+        tracerTime: audit.tracerTime || raw['Horário da Auditoria'] || raw['Horário do Início do Tracer:'] || '',
+        sector: audit.sector || raw['Setor'] || raw['Setor Auditado:'] || ''
+      });
+      if (res.success) {
+        triggerToast('Coleta gravada com sucesso na Planilha Destino (Google Sheets)!', 'success');
+      } else if (res.queued) {
+        triggerToast('Coleta salva na fila de pendências (será enviada à planilha automaticamente).', 'success');
+      } else {
+        triggerToast('Aviso: ' + (res.message || 'Verifique as URLs dos Webhooks na configuração.'), 'error');
+      }
+    } catch (err: any) {
+      triggerToast('Erro ao gravar na planilha destino: ' + (err?.message || err), 'error');
+    } finally {
+      setSendingToSheetId(null);
+    }
+  };
+
   const handleDeleteAudit = async (audit: any) => {
     if (!audit) return;
     try {
       await deleteAudit(audit.id, audit.type, audit);
-      triggerToast('Registro de auditoria excluído do sistema e da planilha com sucesso!', 'success');
+      triggerToast('Registro de auditoria excluído do sistema com sucesso!', 'success');
       setDeletingAudit(null);
     } catch (e: any) {
       console.error('Error deleting audit:', e);
@@ -262,6 +311,22 @@ export default function AuditExplorer({
       await updateAudit(auditId, updatedPayload.type, updatedPayload);
       setEditingAudit(null);
       triggerToast('Registro de auditoria atualizado com sucesso!', 'success');
+
+      // Also trigger sync to destination Google Sheet
+      const tracerId = updatedPayload.type === 'T01' ? 'tracer_01' : updatedPayload.type === 'T02' ? 'tracer_02' : 'tracer_03';
+      sendAuditToGoogleSheet({
+        id: auditId,
+        tracerId,
+        type: updatedPayload.type,
+        rawData: updatedPayload.rawData || {},
+        patientName: updatedPayload.patientName,
+        unitName: updatedPayload.unitName || updatedPayload.unitId,
+        auditorName: updatedPayload.auditorName,
+        medicalRecordNumber: updatedPayload.medicalRecordNumber,
+        tracerDate: updatedPayload.tracerDate,
+        tracerTime: updatedPayload.tracerTime,
+        sector: updatedPayload.sector
+      }).catch(err => console.warn('[AuditExplorer] Auto-sync to sheet notice:', err));
     } catch (e: any) {
       console.error('Error updating audit:', e);
       triggerToast('Erro ao atualizar o registro: ' + e.message, 'error');
@@ -449,11 +514,24 @@ export default function AuditExplorer({
             </button>
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsWebhookModalOpen(true)}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 shadow-sm border border-emerald-600 cursor-pointer"
+              title="Configurações e monitoramento de envio à Planilha Destino (Google Sheets)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-200" />
+              <span>Planilha Destino</span>
+              {pendingQueueCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-400 text-slate-950 font-black rounded-full text-[8.5px]">
+                  {pendingQueueCount}
+                </span>
+              )}
+            </button>
             <button 
               id="export-csv-audits-btn"
               onClick={() => handleExportCSV(false)}
               disabled={isExporting || allAudits.length === 0}
-              className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 active:scale-[0.98] disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-200 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 shadow-sm border border-emerald-800 cursor-pointer"
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 active:scale-[0.98] disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-200 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 shadow-sm border border-slate-800 cursor-pointer"
               title={`Exportar ${allAudits.length} coletas filtradas para planilha CSV`}
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -613,6 +691,8 @@ export default function AuditExplorer({
                       onEdit={setEditingAudit}
                       onDelete={setDeletingAudit}
                       onView={setViewingAudit}
+                      onSendToGoogleSheet={handleSendToGoogleSheet}
+                      isSendingToSheet={sendingToSheetId === audit.id}
                     />
                   ))
                 )}
@@ -661,6 +741,8 @@ export default function AuditExplorer({
           <ViewAuditModal 
             audit={viewingAudit} 
             onClose={() => setViewingAudit(null)} 
+            onSendToGoogleSheet={handleSendToGoogleSheet}
+            isSendingToSheet={sendingToSheetId === viewingAudit.id}
           />
         )}
 
@@ -758,6 +840,11 @@ export default function AuditExplorer({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <GoogleSheetWebhookModal
+        isOpen={isWebhookModalOpen}
+        onClose={() => setIsWebhookModalOpen(false)}
+      />
     </div>
   );
 }
@@ -850,9 +937,18 @@ const AuditRow: React.FC<{
   onEdit: (audit: any) => void;
   onDelete: (audit: any) => void;
   onView: (audit: any) => void;
-}> = ({ audit, isAdmin = true, setViewMode, onEdit, onDelete, onView }) => {
+  onSendToGoogleSheet?: (audit: any) => void;
+  isSendingToSheet?: boolean;
+}> = ({ audit, isAdmin = true, setViewMode, onEdit, onDelete, onView, onSendToGoogleSheet, isSendingToSheet }) => {
   const [expanded, setExpanded] = useState(false);
   const unit = HEALTH_UNITS.find(u => u.id === audit.unitId);
+  const currentUser = auth.currentUser;
+  const isMine = !!(
+    (currentUser && audit.auditorId === currentUser.uid) ||
+    (currentUser?.displayName && audit.auditorName && audit.auditorName.toLowerCase().includes(currentUser.displayName.toLowerCase().split(' ')[0])) ||
+    (currentUser?.email && audit.auditorEmail && audit.auditorEmail.toLowerCase() === currentUser.email.toLowerCase())
+  );
+  const canManage = isAdmin || isMine;
   
   const tracerColor = audit.type === 'T01' ? 'text-red-600 bg-red-50 ring-red-100' : 
                      audit.type === 'T02' ? 'text-amber-600 bg-amber-50 ring-amber-100' : 
@@ -937,7 +1033,30 @@ const AuditRow: React.FC<{
                         <Eye className="w-3.5 h-3.5" />
                         Visualizar Detalhes
                       </button>
-                      {isAdmin && (
+                      {/* Gravar diretamente na Planilha Destino (Disponível para Auditor e Admin) */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSendToGoogleSheet?.(audit);
+                        }}
+                        disabled={isSendingToSheet}
+                        className="w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-[10px] font-black uppercase tracking-wider rounded-md flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm mb-1"
+                        title="Gravar ou reenviar este registro para a Planilha Destino Google Sheets"
+                      >
+                        {isSendingToSheet ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Gravando na Planilha...
+                          </>
+                        ) : (
+                          <>
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            Gravar na Planilha Destino
+                          </>
+                        )}
+                      </button>
+
+                      {canManage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -949,7 +1068,7 @@ const AuditRow: React.FC<{
                           Editar Registro
                         </button>
                       )}
-                      {isAdmin && (
+                      {canManage && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1253,9 +1372,11 @@ const EditAuditModal: React.FC<EditModalProps> = ({ audit, onClose, onSave }) =>
 interface ViewModalProps {
   audit: any;
   onClose: () => void;
+  onSendToGoogleSheet?: (audit: any) => void;
+  isSendingToSheet?: boolean;
 }
 
-const ViewAuditModal: React.FC<ViewModalProps> = ({ audit, onClose }) => {
+const ViewAuditModal: React.FC<ViewModalProps> = ({ audit, onClose, onSendToGoogleSheet, isSendingToSheet }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const data = getAuditRawData(audit);
   const unit = HEALTH_UNITS.find(u => u.id === audit.unitId);
@@ -1428,17 +1549,37 @@ const ViewAuditModal: React.FC<ViewModalProps> = ({ audit, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              exportAuditsToCSV([audit], `auditoria_${audit.type}_${audit.id.replace(/[^a-zA-Z0-9]/g, '_')}.csv`);
-            }}
-            className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            Exportar Registro (CSV)
-          </button>
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                exportAuditsToCSV([audit], `auditoria_${audit.type}_${audit.id.replace(/[^a-zA-Z0-9]/g, '_')}.csv`);
+              }}
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => onSendToGoogleSheet?.(audit)}
+              disabled={isSendingToSheet}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              {isSendingToSheet ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Gravando...
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  Gravar na Planilha Destino
+                </>
+              )}
+            </button>
+          </div>
           <button
             type="button"
             onClick={onClose}

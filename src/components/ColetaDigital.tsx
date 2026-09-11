@@ -29,14 +29,15 @@ import {
   Search,
   Trash2,
   Pencil,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import PatientIdForm from './Forms/PatientIdForm';
 import SafeSurgeryForm from './Forms/SafeSurgeryForm';
 import HandHygieneForm from './Forms/HandHygieneForm';
 import GoogleSheetWebhookModal from './GoogleSheetWebhookModal';
-import { getAllWebhookUrls, getPendingQueue, deleteAuditFromGoogleSheet } from '../lib/googleSheetWebhook';
+import { getAllWebhookUrls, getPendingQueue, deleteAuditFromGoogleSheet, sendAuditToGoogleSheet } from '../lib/googleSheetWebhook';
 
 interface Props {
   user: User;
@@ -75,10 +76,19 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   const [deletingAudit, setDeletingAudit] = useState<any | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
-  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [pendingQueueCount, setPendingQueueCount] = useState(() => getPendingQueue().length);
+  const [auditSheetResult, setAuditSheetResult] = useState<any | null>(null);
+  const [isSyncingRecord, setIsSyncingRecord] = useState(false);
 
   useEffect(() => {
-    setPendingQueueCount(getPendingQueue().length);
+    const updateQueue = () => setPendingQueueCount(getPendingQueue().length);
+    updateQueue();
+    window.addEventListener('pending-queue-updated', updateQueue);
+    window.addEventListener('webhook-urls-updated', updateQueue);
+    return () => {
+      window.removeEventListener('pending-queue-updated', updateQueue);
+      window.removeEventListener('webhook-urls-updated', updateQueue);
+    };
   }, [isWebhookModalOpen, activeTracer, auditSuccess]);
 
   const triggerToast = (text: string, type: 'success' | 'error' = 'success') => {
@@ -389,8 +399,9 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
     }
   };
 
-  const handleAuditComplete = () => {
+  const handleAuditComplete = (sheetResult?: any) => {
     setAuditSuccess(true);
+    setAuditSheetResult(sheetResult || null);
     setEditingAudit(null);
     loadRecentAudits();
   };
@@ -626,9 +637,51 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
                   <div className="space-y-2">
                     <h3 className="text-xl font-extrabold text-emerald-900 uppercase tracking-tight">Coleta Executada com Sucesso!</h3>
                     <p className="text-slate-600 text-xs font-medium max-w-lg mx-auto leading-relaxed">
-                      A auditoria foi registrada com sucesso, sincronizada no banco de dados Firestore e enviada para a planilha Google Sheets de destino configurada.
+                      A auditoria foi registrada com sucesso e sincronizada no banco de dados.
                     </p>
                   </div>
+
+                  {/* Detalhe Explicativo do Envio para o Google Sheets */}
+                  {auditSheetResult ? (
+                    auditSheetResult.success ? (
+                      <div className="max-w-lg mx-auto p-4 bg-white border border-emerald-300 rounded-xl shadow-xs text-xs font-semibold text-emerald-900 flex items-start gap-3 text-left">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-emerald-800">Planilha Google Sheets Destino</p>
+                          <p className="text-[11px] text-slate-600 font-normal mt-0.5">{auditSheetResult.message}</p>
+                        </div>
+                      </div>
+                    ) : auditSheetResult.queued ? (
+                      <div className="max-w-lg mx-auto p-4 bg-amber-50/90 border border-amber-300 rounded-xl shadow-xs text-xs text-amber-900 flex items-start gap-3 text-left">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="font-bold text-amber-900">Atenção com a Planilha Destino</p>
+                          <p className="text-[11px] text-amber-800 font-normal leading-relaxed">{auditSheetResult.message}</p>
+                          <button
+                            onClick={() => setIsWebhookModalOpen(true)}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-800 hover:text-amber-950 underline mt-1"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" /> Configurar URL do Webhook da Planilha Agora
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="max-w-lg mx-auto p-4 bg-red-50 border border-red-200 rounded-xl shadow-xs text-xs text-red-900 flex items-start gap-3 text-left">
+                        <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="font-bold text-red-900">Aviso sobre o envio para a Planilha</p>
+                          <p className="text-[11px] text-red-800 font-normal leading-relaxed">{auditSheetResult.message}</p>
+                          <button
+                            onClick={() => setIsWebhookModalOpen(true)}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-red-800 hover:text-red-950 underline mt-1"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5" /> Abrir Configurações da Planilha
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  ) : null}
+
                   <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
                     <button 
                       onClick={() => setAuditSuccess(false)}
@@ -1215,7 +1268,47 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
 
               {/* Close Button & Actions */}
               <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-wrap gap-2 justify-between items-center shrink-0">
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!selectedAudit) return;
+                      setIsSyncingRecord(true);
+                      try {
+                        const tracerId = selectedAudit.type === 'T01' ? 'tracer_01' : selectedAudit.type === 'T02' ? 'tracer_02' : 'tracer_03';
+                        const res = await sendAuditToGoogleSheet({
+                          id: selectedAudit.id,
+                          tracerId,
+                          type: selectedAudit.type,
+                          rawData: selectedAudit.rawData || {},
+                          patientName: selectedAudit.patientName,
+                          unitName: selectedAudit.unitName || selectedAudit.unitId,
+                          auditorName: selectedAudit.auditorName,
+                          medicalRecordNumber: selectedAudit.medicalRecordNumber,
+                          tracerDate: selectedAudit.tracerDate,
+                          tracerTime: selectedAudit.tracerTime,
+                          sector: selectedAudit.sector
+                        });
+                        if (res.success) {
+                          setToastMessage({ text: 'Coleta gravada com sucesso na Planilha Destino (Google Sheets)!', type: 'success' });
+                        } else if (res.queued) {
+                          setToastMessage({ text: 'Coleta salva na fila de pendências para sincronização com a planilha.', type: 'success' });
+                        } else {
+                          setToastMessage({ text: res.message || 'Aviso ao enviar à planilha.', type: 'error' });
+                        }
+                      } catch (err: any) {
+                        setToastMessage({ text: 'Erro ao gravar na planilha: ' + (err?.message || err), type: 'error' });
+                      } finally {
+                        setIsSyncingRecord(false);
+                      }
+                    }}
+                    disabled={isSyncingRecord}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                    title="Gravar ou reenviar esta coleta para a planilha Google Sheets"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                    {isSyncingRecord ? 'Gravando...' : 'Gravar na Planilha'}
+                  </button>
+
                   <button
                     onClick={() => {
                       const item = selectedAudit;

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, Copy, Check, ExternalLink, ArrowRight, 
-  Send, RefreshCw, AlertCircle, CheckCircle2, ShieldCheck, X 
+  Send, RefreshCw, AlertCircle, CheckCircle2, ShieldCheck, X,
+  AlertTriangle, Sparkles, HelpCircle, Loader2
 } from 'lucide-react';
 import { 
-  getAllWebhookUrls, setWebhookUrl, getAppsScriptCode, 
-  getPendingQueue, flushPendingQueue, sendAuditToGoogleSheet 
+  getAllWebhookUrls, setAllWebhookUrls, setWebhookUrl, getAppsScriptCode, 
+  getPendingQueue, flushPendingQueue, sendAuditToGoogleSheet,
+  validateWebhookUrl, SheetWebhookConfig, testWebhookConnection
 } from '../lib/googleSheetWebhook';
 
 interface Props {
@@ -15,14 +17,15 @@ interface Props {
 
 export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
   const [copied, setCopied] = useState(false);
-  const [webhookUrls, setWebhookUrls] = useState({
+  const [webhookUrls, setWebhookUrls] = useState<SheetWebhookConfig>({
     tracer_01: '',
     tracer_02: '',
     tracer_03: ''
   });
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [testingTracer, setTestingTracer] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{ msg: string; success: boolean } | null>(null);
+  const [testResult, setTestResult] = useState<{ msg: string; success: boolean; sheetName?: string; rowNumber?: number } | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [flushing, setFlushing] = useState(false);
 
@@ -43,44 +46,54 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
     setTimeout(() => setCopied(false), 3000);
   };
 
+  const handleApplyToAll = (sourceUrl: string) => {
+    if (!sourceUrl.trim()) return;
+    setWebhookUrls({
+      tracer_01: sourceUrl.trim(),
+      tracer_02: sourceUrl.trim(),
+      tracer_03: sourceUrl.trim()
+    });
+  };
+
   const handleSaveUrls = async () => {
-    await Promise.all([
-      setWebhookUrl('tracer_01', webhookUrls.tracer_01),
-      setWebhookUrl('tracer_02', webhookUrls.tracer_02),
-      setWebhookUrl('tracer_03', webhookUrls.tracer_03)
-    ]);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3500);
+    setIsSaving(true);
+    try {
+      await setAllWebhookUrls(webhookUrls);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3500);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTest = async (tracerId: 'tracer_01' | 'tracer_02' | 'tracer_03', tracerName: string) => {
     setTestingTracer(tracerId);
     setTestResult(null);
     try {
-      const result = await sendAuditToGoogleSheet({
-        id: 'test_' + Date.now(),
-        tracerId,
-        type: tracerId === 'tracer_01' ? 'T01' : tracerId === 'tracer_02' ? 'T02' : 'T03',
-        rawData: {
-          'Carimbo de data/hora': new Date().toLocaleString('pt-BR'),
-          'Unidade de Saúde': 'Hospital Geral (Teste de Conexão)',
-          'Auditor': 'Teste do Sistema',
-          'Status do Teste': 'Conexão Estabelecida com Sucesso!'
-        },
-        patientName: 'Paciente Teste',
-        unitName: 'Hospital Geral'
-      });
+      const targetUrl = (webhookUrls[tracerId] || webhookUrls.tracer_01 || webhookUrls.tracer_02 || webhookUrls.tracer_03 || '').trim();
+      const val = validateWebhookUrl(targetUrl);
+      if (!val.valid) {
+        setTestResult({
+          success: false,
+          msg: val.error || 'A URL informada não é válida para envio.'
+        });
+        return;
+      }
+
+      // Save URLs immediately to ensure state is active
+      setAllWebhookUrls(webhookUrls);
+
+      // Execute safe, timed test (max 8 seconds)
+      const result = await testWebhookConnection(tracerId, targetUrl);
       setTestResult({
         success: result.success,
-        msg: result.success 
-          ? `Sucesso: Linha de teste enviada para ${tracerName}!` 
-          : result.message
+        msg: result.message
       });
       setPendingCount(getPendingQueue().length);
     } catch (e: any) {
       setTestResult({
         success: false,
-        msg: `Erro no teste: ${e.message || 'Falha de conexão'}`
+        msg: `Erro no teste: ${e.message || 'Falha de conexão. Verifique se o Apps Script foi implantado com acesso para Qualquer Pessoa.'}`
       });
     } finally {
       setTestingTracer(null);
@@ -106,6 +119,39 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
     }
   };
 
+  const renderUrlValidation = (url: string) => {
+    if (!url.trim()) {
+      return (
+        <span className="text-[10px] text-slate-400 font-medium">
+          Nenhuma URL específica (se vazio, usará a URL de outro Tracer configurado)
+        </span>
+      );
+    }
+    const val = validateWebhookUrl(url);
+    if (!val.valid) {
+      return (
+        <span className="text-[10px] text-red-600 font-bold flex items-center gap-1">
+          <AlertCircle className="w-3 h-3 shrink-0" />
+          {val.error}
+        </span>
+      );
+    }
+    if (val.warning) {
+      return (
+        <span className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3 shrink-0" />
+          {val.warning}
+        </span>
+      );
+    }
+    return (
+      <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+        <Check className="w-3 h-3 shrink-0" />
+        URL Válida do Web App (/exec)
+      </span>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -118,7 +164,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
             <div>
               <h2 className="text-lg font-bold">Configuração da Planilha Destino (Google Sheets)</h2>
               <p className="text-xs text-emerald-100 font-medium">
-                Sincronização bidirecional: gravação em tempo real e exclusão automática de linhas na planilha
+                Gravação automática em tempo real e sincronização completa dos Tracers
               </p>
             </div>
           </div>
@@ -131,38 +177,62 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
         </div>
 
         <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          {/* Critical Setup Alert */}
+          <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 space-y-2">
+            <div className="flex items-center gap-2 text-amber-900 font-black text-xs uppercase tracking-wider">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              Atenção Obrigatória para Funcionar (Acesso no Apps Script)
+            </div>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              Ao criar ou atualizar a implantação no <strong>Google Apps Script</strong>, o campo <strong>"Quem tem acesso" (Who has access)</strong> <span className="underline font-bold">DEVE ser selecionado como "Qualquer pessoa" (Anyone)</span>. Se deixar como <em>"Apenas eu"</em>, o Google bloqueia o envio dos dados vindos do app web!
+            </p>
+          </div>
+
           {/* Instructions Step-by-Step */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
             <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              Como ativar a gravação direta no Google Sheets (1 Minuto):
+              Passo a Passo Rápido (1 Minuto):
             </h3>
             <ol className="text-xs text-slate-600 space-y-2 list-decimal list-inside leading-relaxed font-medium">
-              <li>Abra sua planilha do Google Sheets onde deseja receber os dados.</li>
-              <li>No menu superior, vá em <strong>Extensões → Apps Script</strong>.</li>
+              <li>Abra sua planilha no Google Sheets onde deseja registrar os dados.</li>
+              <li>No menu superior da planilha, clique em: <strong>Extensões → Apps Script</strong>.</li>
               <li>Apague o código de exemplo e <strong>cole o código abaixo</strong>.</li>
-              <li>Clique em <strong>Implantar → Nova Implantação</strong>.</li>
-              <li>Selecione tipo <strong>App da Web</strong>, configure <em>"Quem tem acesso: Qualquer pessoa"</em> e clique em Implantar.</li>
-              <li>Copie a <strong>URL do App da Web</strong> (termina com <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800">/exec</code>) e cole nos campos abaixo.</li>
+              <li>Clique no botão azul <strong>Implantar → Nova Implantação</strong> (ou Gerenciar Implantações).</li>
+              <li>Selecione o tipo de engrenagem <strong>App da Web</strong>.</li>
+              <li>Defina <em>"Executar como: Eu"</em> e <strong>"Quem tem acesso: Qualquer pessoa"</strong> (Anyone).</li>
+              <li>Clique em <strong>Implantar</strong>, copie a <strong>URL do App da Web</strong> (termina com <code className="bg-slate-200 px-1 py-0.5 rounded text-slate-800">/exec</code>) e cole abaixo.</li>
             </ol>
 
-            <div className="pt-2 flex items-center justify-between">
+            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <button
                 onClick={handleCopyCode}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
               >
                 {copied ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
-                {copied ? 'Código Copiado com Sucesso!' : 'Copiar Código do Google Apps Script'}
+                {copied ? 'Código Copiado para a Área de Transferência!' : 'Copiar Código do Google Apps Script'}
               </button>
-              <span className="text-[11px] text-slate-400">Compatível com Google Sheets oficial</span>
+              <span className="text-[11px] text-slate-400 text-center sm:text-right">Identifica automaticamente as abas de cada Tracer</span>
             </div>
           </div>
 
           {/* Webhook URLs per Tracer */}
           <div className="space-y-4">
-            <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-              URLs de Destino (Webhooks / Apps Script):
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                URLs do Web App (Google Apps Script):
+              </h3>
+              {(webhookUrls.tracer_01 || webhookUrls.tracer_02 || webhookUrls.tracer_03) && (
+                <button
+                  type="button"
+                  onClick={() => handleApplyToAll(webhookUrls.tracer_01 || webhookUrls.tracer_02 || webhookUrls.tracer_03)}
+                  className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 transition-colors"
+                >
+                  <Sparkles className="w-3 h-3 text-emerald-600" />
+                  Usar a mesma URL nos 3 Tracers
+                </button>
+              )}
+            </div>
 
             {/* Tracer 01 */}
             <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2">
@@ -172,12 +242,22 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                   Tracer 01 - Beira Leito (Destino)
                 </label>
                 <button
+                  type="button"
                   onClick={() => handleTest('tracer_01', 'Tracer 01')}
-                  disabled={!webhookUrls.tracer_01 || testingTracer !== null}
-                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1 disabled:opacity-40 transition-colors"
+                  disabled={testingTracer !== null}
+                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
                 >
-                  <Send className="w-3 h-3" />
-                  {testingTracer === 'tracer_01' ? 'Testando...' : 'Testar Envio'}
+                  {testingTracer === 'tracer_01' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                      <span className="text-emerald-700">Testando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3 h-3" />
+                      <span>Testar Envio</span>
+                    </>
+                  )}
                 </button>
               </div>
               <input
@@ -187,6 +267,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                 placeholder="https://script.google.com/macros/s/.../exec"
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
               />
+              <div className="pt-0.5">{renderUrlValidation(webhookUrls.tracer_01)}</div>
             </div>
 
             {/* Tracer 02 */}
@@ -197,12 +278,22 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                   Tracer 02 - Proc. Cirúrgicos (Destino)
                 </label>
                 <button
+                  type="button"
                   onClick={() => handleTest('tracer_02', 'Tracer 02')}
-                  disabled={!webhookUrls.tracer_02 || testingTracer !== null}
-                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1 disabled:opacity-40 transition-colors"
+                  disabled={testingTracer !== null}
+                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
                 >
-                  <Send className="w-3 h-3" />
-                  {testingTracer === 'tracer_02' ? 'Testando...' : 'Testar Envio'}
+                  {testingTracer === 'tracer_02' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                      <span className="text-emerald-700">Testando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3 h-3" />
+                      <span>Testar Envio</span>
+                    </>
+                  )}
                 </button>
               </div>
               <input
@@ -212,6 +303,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                 placeholder="https://script.google.com/macros/s/.../exec"
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
               />
+              <div className="pt-0.5">{renderUrlValidation(webhookUrls.tracer_02)}</div>
             </div>
 
             {/* Tracer 03 */}
@@ -222,12 +314,22 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                   Tracer 03 - Proc. Medicação (Destino)
                 </label>
                 <button
+                  type="button"
                   onClick={() => handleTest('tracer_03', 'Tracer 03')}
-                  disabled={!webhookUrls.tracer_03 || testingTracer !== null}
-                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1 disabled:opacity-40 transition-colors"
+                  disabled={testingTracer !== null}
+                  className="text-[11px] font-bold text-slate-600 hover:text-emerald-700 flex items-center gap-1.5 disabled:opacity-50 transition-colors"
                 >
-                  <Send className="w-3 h-3" />
-                  {testingTracer === 'tracer_03' ? 'Testando...' : 'Testar Envio'}
+                  {testingTracer === 'tracer_03' ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-emerald-600" />
+                      <span className="text-emerald-700">Testando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3 h-3" />
+                      <span>Testar Envio</span>
+                    </>
+                  )}
                 </button>
               </div>
               <input
@@ -237,16 +339,24 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                 placeholder="https://script.google.com/macros/s/.../exec"
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
               />
+              <div className="pt-0.5">{renderUrlValidation(webhookUrls.tracer_03)}</div>
             </div>
           </div>
 
           {/* Test & Queue feedback */}
           {testResult && (
-            <div className={`p-3 rounded-lg flex items-center gap-2 text-xs font-semibold ${
-              testResult.success ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
+            <div className={`p-4 rounded-xl flex items-start gap-2.5 text-xs font-semibold ${
+              testResult.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'
             }`}>
-              {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
-              {testResult.msg}
+              {testResult.success ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" /> : <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />}
+              <div className="space-y-1">
+                <div>{testResult.msg}</div>
+                {!testResult.success && (
+                  <p className="text-[11px] text-red-600 font-normal leading-relaxed">
+                    Dica: Se o erro for de conexão ou CORS, acesse o Apps Script &gt; Implantar &gt; Gerenciar Implantações e certifique-se de que "Quem tem acesso" está como "Qualquer pessoa".
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -276,7 +386,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
           <div className="flex items-center gap-2">
             {saveSuccess && (
               <span className="text-xs text-emerald-600 font-bold flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4" /> Configurações salvas com sucesso!
+                <CheckCircle2 className="w-4 h-4" /> Configurações salvas e sincronizadas!
               </span>
             )}
           </div>
@@ -289,9 +399,11 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
             </button>
             <button
               onClick={handleSaveUrls}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2 rounded-lg transition-all shadow-sm active:scale-95 flex items-center gap-2"
+              disabled={isSaving}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2.5 rounded-lg transition-all shadow-sm active:scale-95 flex items-center gap-2 disabled:opacity-50"
             >
-              Salvar URLs de Destino
+              <FileSpreadsheet className="w-4 h-4" />
+              {isSaving ? 'Salvando...' : 'Salvar URLs de Destino'}
             </button>
           </div>
         </div>

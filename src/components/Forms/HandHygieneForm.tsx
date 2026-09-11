@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
   user: User;
-  onComplete: () => void;
+  onComplete: (sheetResult?: any) => void;
   editingAudit?: any;
   isAdmin?: boolean;
   userUnit?: string | null;
@@ -694,8 +694,9 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
       }
 
       // 3. Dispatch to destination Google Sheet Webhook if configured
+      let sheetRes: any = null;
       try {
-        await sendAuditToGoogleSheet({
+        sheetRes = await sendAuditToGoogleSheet({
           id: activeDocId,
           tracerId: 'tracer_03',
           type: 'T03',
@@ -713,7 +714,7 @@ export default function HandHygieneForm({ user, onComplete, editingAudit, isAdmi
       }
 
       window.dispatchEvent(new Event('local-data-updated'));
-      onComplete();
+      onComplete(sheetRes);
     } catch (err: any) {
       console.error('Error in save:', err);
       window.dispatchEvent(new Event('local-data-updated'));
