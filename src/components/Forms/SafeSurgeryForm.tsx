@@ -554,8 +554,13 @@ export default function SafeSurgeryForm({ user, onComplete, editingAudit, isAdmi
           tracerTime: formData.q3_horario,
           sector
         });
-      } catch (sheetErr) {
+      } catch (sheetErr: any) {
         console.warn('[SafeSurgeryForm] Google Sheet webhook notice:', sheetErr);
+        sheetRes = {
+          success: false,
+          message: `Não foi possível enviar para a planilha: ${sheetErr?.message || 'Falha de rede ou configuração'}. A coleta foi salva com sucesso no sistema.`,
+          queued: true
+        };
       }
 
       window.dispatchEvent(new Event('local-data-updated'));
