@@ -111,9 +111,42 @@ let inMemoryUrls: SheetWebhookConfig = {
 
 // Initialize cloud sync with Firestore
 let initializedCloudSync = false;
+
+export async function fetchWebhookUrlsFromCloud(): Promise<SheetWebhookConfig> {
+  if (typeof window === 'undefined') return inMemoryUrls;
+  try {
+    const configDocRef = doc(db, 'system_config', 'webhook_urls');
+    const snap = await getDoc(configDocRef);
+    if (snap.exists()) {
+      const data = snap.data() as Partial<SheetWebhookConfig>;
+      if (data) {
+        if (data.tracer_01 !== undefined) {
+          inMemoryUrls.tracer_01 = data.tracer_01 || '';
+          localStorage.setItem(STORAGE_KEYS.tracer_01, data.tracer_01 || '');
+        }
+        if (data.tracer_02 !== undefined) {
+          inMemoryUrls.tracer_02 = data.tracer_02 || '';
+          localStorage.setItem(STORAGE_KEYS.tracer_02, data.tracer_02 || '');
+        }
+        if (data.tracer_03 !== undefined) {
+          inMemoryUrls.tracer_03 = data.tracer_03 || '';
+          localStorage.setItem(STORAGE_KEYS.tracer_03, data.tracer_03 || '');
+        }
+        window.dispatchEvent(new Event('webhook-urls-updated'));
+      }
+    }
+  } catch (e: any) {
+    console.warn('[GoogleSheetWebhook] Cloud fetch fallback notice:', e?.message || e);
+  }
+  return getAllWebhookUrls();
+}
+
 export function initWebhookCloudSync() {
   if (initializedCloudSync || typeof window === 'undefined') return;
   initializedCloudSync = true;
+
+  // Immediate fetch
+  fetchWebhookUrlsFromCloud().catch(() => {});
 
   try {
     const configDocRef = doc(db, 'system_config', 'webhook_urls');
@@ -207,9 +240,13 @@ export async function setWebhookUrl(tracerId: 'tracer_01' | 'tracer_02' | 'trace
   } catch (err) {
     console.warn('[GoogleSheetWebhook] Failed to save webhook URL to Firestore (saved locally):', err);
   }
+
+  if (cleanUrl) {
+    flushPendingQueue().catch(() => {});
+  }
 }
 
-export async function setAllWebhookUrls(config: SheetWebhookConfig): Promise<void> {
+export async function setAllWebhookUrls(config: SheetWebhookConfig): Promise<{ success: boolean; cloudSynced: boolean; message: string }> {
   const sanitize = (u?: string) => {
     let s = (u || '').trim();
     if (s.endsWith('/dev')) s = s.replace(/\/dev$/, '/exec');
@@ -228,23 +265,35 @@ export async function setAllWebhookUrls(config: SheetWebhookConfig): Promise<voi
     localStorage.setItem(STORAGE_KEYS.tracer_02, cleanConfig.tracer_02);
     localStorage.setItem(STORAGE_KEYS.tracer_03, cleanConfig.tracer_03);
   }
-  window.dispatchEvent(new Event('webhook-urls-updated'));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('webhook-urls-updated'));
+  }
 
-  // 2. Persist to Firestore for all connected devices (with timeout to prevent freezing)
+  // 2. Persist to Firestore for all connected devices
+  let cloudSynced = false;
   try {
     const configDocRef = doc(db, 'system_config', 'webhook_urls');
-    Promise.race([
-      setDoc(configDocRef, {
-        ...cleanConfig,
-        updatedAt: new Date().toISOString()
-      }, { merge: true }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
-    ]).catch(err => {
-      console.warn('[GoogleSheetWebhook] Cloud sync notice (saved locally):', err?.message || err);
-    });
-  } catch (err) {
-    console.warn('[GoogleSheetWebhook] Failed to save webhook URLs to Firestore (saved locally):', err);
+    await setDoc(configDocRef, {
+      ...cleanConfig,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    cloudSynced = true;
+  } catch (err: any) {
+    console.warn('[GoogleSheetWebhook] Cloud sync warning (saved locally):', err?.message || err);
   }
+
+  // 3. Automatically dispatch any pending queue if URLs are now set!
+  if (cleanConfig.tracer_01 || cleanConfig.tracer_02 || cleanConfig.tracer_03) {
+    flushPendingQueue().catch(() => {});
+  }
+
+  return {
+    success: true,
+    cloudSynced,
+    message: cloudSynced 
+      ? 'URLs salvas e sincronizadas na nuvem com sucesso para todos os auditores e dispositivos!' 
+      : 'URLs salvas localmente neste navegador.'
+  };
 }
 
 export function getAllWebhookUrls(): SheetWebhookConfig {
@@ -613,7 +662,7 @@ export async function flushPendingQueue(): Promise<{ sent: number; total: number
   let errors = 0;
 
   for (const item of queue) {
-    const webhookUrl = getWebhookUrl(item.tracerId);
+    const webhookUrl = getWebhookUrl(item.tracerId, true);
     if (!webhookUrl) {
       errors++;
       continue;
@@ -637,6 +686,11 @@ export async function flushPendingQueue(): Promise<{ sent: number; total: number
           type: item.type,
           patientName: item.patientName || '',
           unitName: item.unitName || '',
+          auditorName: item.auditorName || '',
+          medicalRecordNumber: item.medicalRecordNumber || '',
+          tracerDate: item.tracerDate || '',
+          tracerTime: item.tracerTime || '',
+          sector: item.sector || '',
           createdAt: item.timestamp,
           data: item.rawData
         }),

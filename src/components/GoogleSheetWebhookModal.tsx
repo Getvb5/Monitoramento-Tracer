@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, Copy, Check, ExternalLink, ArrowRight, 
   Send, RefreshCw, AlertCircle, CheckCircle2, ShieldCheck, X,
-  AlertTriangle, Sparkles, HelpCircle, Loader2
+  AlertTriangle, Sparkles, HelpCircle, Loader2, Cloud
 } from 'lucide-react';
 import { 
   getAllWebhookUrls, setAllWebhookUrls, setWebhookUrl, getAppsScriptCode, 
   getPendingQueue, flushPendingQueue, sendAuditToGoogleSheet,
-  validateWebhookUrl, SheetWebhookConfig, testWebhookConnection
+  validateWebhookUrl, SheetWebhookConfig, testWebhookConnection,
+  fetchWebhookUrlsFromCloud
 } from '../lib/googleSheetWebhook';
 
 interface Props {
@@ -22,19 +23,37 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
     tracer_02: '',
     tracer_03: ''
   });
+  const [singleGlobalUrl, setSingleGlobalUrl] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveStatusMessage, setSaveStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [testingTracer, setTestingTracer] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ msg: string; success: boolean; sheetName?: string; rowNumber?: number } | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [flushing, setFlushing] = useState(false);
+  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setWebhookUrls(getAllWebhookUrls());
+      const current = getAllWebhookUrls();
+      setWebhookUrls(current);
+      setSingleGlobalUrl(current.tracer_01 || current.tracer_02 || current.tracer_03 || '');
       setPendingCount(getPendingQueue().length);
       setTestResult(null);
       setSaveSuccess(false);
+      setSaveStatusMessage('');
+
+      setIsLoadingCloud(true);
+      fetchWebhookUrlsFromCloud()
+        .then((cloudUrls) => {
+          setWebhookUrls(cloudUrls);
+          if (cloudUrls.tracer_01 || cloudUrls.tracer_02 || cloudUrls.tracer_03) {
+            setSingleGlobalUrl(cloudUrls.tracer_01 || cloudUrls.tracer_02 || cloudUrls.tracer_03 || '');
+          }
+        })
+        .finally(() => {
+          setIsLoadingCloud(false);
+        });
     }
   }, [isOpen]);
 
@@ -46,21 +65,40 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
     setTimeout(() => setCopied(false), 3000);
   };
 
+  const handleApplySingleUrl = () => {
+    if (!singleGlobalUrl.trim()) return;
+    const clean = singleGlobalUrl.trim();
+    setWebhookUrls({
+      tracer_01: clean,
+      tracer_02: clean,
+      tracer_03: clean
+    });
+  };
+
   const handleApplyToAll = (sourceUrl: string) => {
     if (!sourceUrl.trim()) return;
+    const clean = sourceUrl.trim();
+    setSingleGlobalUrl(clean);
     setWebhookUrls({
-      tracer_01: sourceUrl.trim(),
-      tracer_02: sourceUrl.trim(),
-      tracer_03: sourceUrl.trim()
+      tracer_01: clean,
+      tracer_02: clean,
+      tracer_03: clean
     });
   };
 
   const handleSaveUrls = async () => {
     setIsSaving(true);
     try {
-      await setAllWebhookUrls(webhookUrls);
+      const res = await setAllWebhookUrls(webhookUrls);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3500);
+      setSaveStatusMessage(res.message);
+      setPendingCount(getPendingQueue().length);
+      setTimeout(() => setSaveSuccess(false), 5000);
+    } catch (e: any) {
+      setTestResult({
+        success: false,
+        msg: 'Erro ao salvar URLs: ' + (e?.message || e)
+      });
     } finally {
       setIsSaving(false);
     }
@@ -81,7 +119,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
       }
 
       // Save URLs immediately to ensure state is active
-      setAllWebhookUrls(webhookUrls);
+      await setAllWebhookUrls(webhookUrls);
 
       // Execute safe, timed test (max 8 seconds)
       const result = await testWebhookConnection(tracerId, targetUrl);
@@ -162,9 +200,15 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
               <FileSpreadsheet className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Configuração da Planilha Destino (Google Sheets)</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold">Configuração da Planilha Destino (Google Sheets)</h2>
+                <span className="text-[10px] bg-white/20 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <Cloud className={`w-3 h-3 ${isLoadingCloud ? 'animate-pulse' : ''}`} />
+                  {isLoadingCloud ? 'Buscando da Nuvem...' : 'Sincronizado na Nuvem'}
+                </span>
+              </div>
               <p className="text-xs text-emerald-100 font-medium">
-                Gravação automática em tempo real e sincronização completa dos Tracers
+                Gravação automática em tempo real e sincronização completa para todos os auditores
               </p>
             </div>
           </div>
@@ -213,6 +257,42 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
                 {copied ? 'Código Copiado para a Área de Transferência!' : 'Copiar Código do Google Apps Script'}
               </button>
               <span className="text-[11px] text-slate-400 text-center sm:text-right">Identifica automaticamente as abas de cada Tracer</span>
+            </div>
+          </div>
+
+          {/* Quick Single URL Setup */}
+          <div className="bg-emerald-50/80 border border-emerald-300 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="text-xs font-black uppercase text-emerald-900 tracking-wider">
+                  Configuração Rápida (URL Única para Todos os Tracers)
+                </span>
+              </div>
+              <span className="text-[10px] text-emerald-800 font-bold bg-emerald-200/80 px-2 py-0.5 rounded">
+                Recomendado
+              </span>
+            </div>
+            <p className="text-xs text-emerald-800 leading-relaxed font-normal">
+              Se você implantou o Apps Script em uma única planilha com abas (ex: <em>Tracer 01</em>, <em>Tracer 02</em>, <em>Tracer 03</em>), cole a URL aqui e clique em <strong>Aplicar a Todos os Tracers</strong>:
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={singleGlobalUrl}
+                onChange={(e) => setSingleGlobalUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="flex-1 bg-white border border-emerald-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none text-slate-800"
+              />
+              <button
+                type="button"
+                onClick={handleApplySingleUrl}
+                disabled={!singleGlobalUrl.trim()}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-xs shrink-0 disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Aplicar aos 3 Tracers
+              </button>
             </div>
           </div>
 
@@ -386,7 +466,7 @@ export default function GoogleSheetWebhookModal({ isOpen, onClose }: Props) {
           <div className="flex items-center gap-2">
             {saveSuccess && (
               <span className="text-xs text-emerald-600 font-bold flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4" /> Configurações salvas e sincronizadas!
+                <CheckCircle2 className="w-4 h-4" /> {saveStatusMessage || 'Configurações salvas e sincronizadas na nuvem!'}
               </span>
             )}
           </div>

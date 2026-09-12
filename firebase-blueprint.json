@@ -74,6 +74,17 @@
       "properties": {
         "status": { "type": "string" }
       }
+    },
+    "system_config": {
+      "title": "Configuração do Sistema",
+      "description": "Configurações gerais do sistema, incluindo URLs de webhook das planilhas Google Sheets.",
+      "type": "object",
+      "properties": {
+        "tracer_01": { "type": "string" },
+        "tracer_02": { "type": "string" },
+        "tracer_03": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -100,6 +111,10 @@
     "/test/{id}": {
       "schema": "test_connection",
       "description": "Caminho de teste de conectividade do Firestore"
+    },
+    "/system_config/{id}": {
+      "schema": "system_config",
+      "description": "Configurações de integração e webhooks"
     }
   }
 }

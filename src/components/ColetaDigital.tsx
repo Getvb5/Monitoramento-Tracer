@@ -81,7 +81,17 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
   const [isSyncingRecord, setIsSyncingRecord] = useState(false);
 
   useEffect(() => {
-    const updateQueue = () => setPendingQueueCount(getPendingQueue().length);
+    const updateQueue = () => {
+      const qLen = getPendingQueue().length;
+      setPendingQueueCount(qLen);
+      if (qLen === 0 && auditSheetResult?.queued) {
+        setAuditSheetResult({
+          success: true,
+          queued: false,
+          message: 'Planilha destino sincronizada! Os registros pendentes foram enviados com sucesso.'
+        });
+      }
+    };
     updateQueue();
     window.addEventListener('pending-queue-updated', updateQueue);
     window.addEventListener('webhook-urls-updated', updateQueue);
@@ -89,7 +99,7 @@ export default function ColetaDigital({ user, isAdmin = true, userUnit = null }:
       window.removeEventListener('pending-queue-updated', updateQueue);
       window.removeEventListener('webhook-urls-updated', updateQueue);
     };
-  }, [isWebhookModalOpen, activeTracer, auditSuccess]);
+  }, [isWebhookModalOpen, activeTracer, auditSuccess, auditSheetResult]);
 
   const triggerToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
